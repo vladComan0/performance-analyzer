@@ -1,0 +1,52 @@
+name: Build and Test
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "The job was triggered by a ${{ github.event_name }} event."
+
+      - run: echo "This job is now running on a ${{ runner.os }} server hosted by Github."
+
+      - run: echo "The branch from which this job was triggered is ${{ github.ref }} and the repository is ${{ github.repository }}."
+
+      - name: Checkout repository code
+        uses: actions/checkout@v2
+
+      - run: echo "The ${{ github.repository }} repository has been cloned to the runner.}}"
+
+      - run: echo "The repository has been copied to the path ${{ github.workspace }} on the runner."
+
+      - name: Setup Go v.1.21
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.21
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: List files after build
+        run: ls -l ${{ github.workspace }}
+
+      - name: Setup golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.59.0
+
+      - name: Run golangci-lint
+        run: golangci-lint run ./...
+
+      - name: Test
+        run: go test -short -race -vet=off ./...
+
+      - run: echo "This job's status is ${{ job.status }}"
