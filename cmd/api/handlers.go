@@ -293,7 +293,7 @@ func (app *application) createWorker(w http.ResponseWriter, r *http.Request) {
 	headers := make(http.Header)
 	headers.Set("Location", fmt.Sprintf("v1/workers/%d", id))
 
-	if err := app.helper.WriteJSON(w, http.StatusCreated, helpers.Envelope{"worker": input}, nil); err != nil {
+	if err := app.helper.WriteJSON(w, http.StatusCreated, helpers.Envelope{"worker": worker}, nil); err != nil {
 		app.helper.ServerError(w, err)
 		return
 	}
