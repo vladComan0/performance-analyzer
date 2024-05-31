@@ -4,7 +4,7 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"github.com/spf13/viper"
-	"github.com/vladComan0/performance-analyzer/internal/models"
+	"github.com/vladComan0/performance-analyzer/internal/data"
 	"github.com/vladComan0/performance-analyzer/pkg/helpers"
 	"log"
 	"net/http"
@@ -24,7 +24,8 @@ type config struct {
 }
 
 type application struct {
-	environments models.EnvironmentModelInterface
+	environments data.EnvironmentStorageInterface
+	workers      data.WorkerStorageInterface
 	config       config
 	helper       *helpers.Helper
 	infoLog      *log.Logger
@@ -32,14 +33,14 @@ type application struct {
 }
 
 func main() {
-	var config config
+	var cfg config
 
 	infoLog := log.New(os.Stdout, "INFO\t", log.Ldate|log.Ltime)
 	errorLog := log.New(os.Stderr, "ERROR\t", log.Ldate|log.Ltime|log.Lshortfile)
 
-	getConfig(errorLog, &config)
+	getConfig(errorLog, &cfg)
 
-	db, err := openDB(config.DSN)
+	db, err := openDB(cfg.DSN)
 	if err != nil {
 		errorLog.Fatal(err)
 	}
@@ -47,16 +48,21 @@ func main() {
 		_ = db.Close()
 	}()
 
-	helper := helpers.NewHelper(infoLog, errorLog, config.DebugEnabled)
+	helper := helpers.NewHelper(infoLog, errorLog, cfg.DebugEnabled)
 
-	environmentModel := &models.EnvironmentModel{
+	environmentModel := &data.EnvironmentStorage{
+		DB: db,
+	}
+
+	workerModel := &data.WorkerStorage{
 		DB: db,
 	}
 
 	// dependency injection
 	app := &application{
 		environments: environmentModel,
-		config:       config,
+		workers:      workerModel,
+		config:       cfg,
 		helper:       helper,
 		infoLog:      infoLog,
 		errorLog:     errorLog,
@@ -75,7 +81,7 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr:         config.Addr,
+		Addr:         cfg.Addr,
 		Handler:      app.routes(),
 		IdleTimeout:  time.Minute,
 		ReadTimeout:  5 * time.Second,

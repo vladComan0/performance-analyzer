@@ -1,4 +1,4 @@
-package models
+package data
 
 import "github.com/vladComan0/performance-analyzer/pkg/tokens"
 

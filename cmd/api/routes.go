@@ -18,6 +18,11 @@ func (app *application) routes() http.Handler {
 	mux.HandleFunc("PUT /v1/environments/{id}", app.updateEnvironment)
 	mux.HandleFunc("DELETE /v1/environments/{id}", app.deleteEnvironment)
 
+	// Workers CR
+	mux.HandleFunc("POST /v1/workers", app.createWorker)
+	mux.HandleFunc("GET /v1/workers/{id}", app.getWorker)
+	mux.HandleFunc("GET /v1/workers", app.getAllWorkers)
+
 	standardChain := alice.New(app.recoverPanic, app.logRequests, app.enableCORS)
 
 	return standardChain.Then(mux)
