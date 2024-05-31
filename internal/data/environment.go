@@ -1,8 +1,9 @@
-package models
+package data
 
 import (
 	"database/sql"
 	"errors"
+	errors2 "github.com/vladComan0/performance-analyzer/internal/errors"
 	"github.com/vladComan0/tasty-byte/pkg/transactions"
 	"golang.org/x/crypto/bcrypt"
 	"log"
@@ -12,29 +13,29 @@ import (
 
 const COST = 12 // 2^12 bcrypt iterations used to generate the password hash (4-31)
 
-type EnvironmentModelInterface interface {
+type EnvironmentStorageInterface interface {
 	Ping() error
 	Insert(environment *Environment) (int, error)
 	Get(id int) (*Environment, error)
-	GetWithTx(tx transactions.Transaction, id int) (*Environment, error)
 	GetAll() ([]*Environment, error)
 	Update(environment *Environment) error
 	Delete(id int) error
 }
 
-type Environment struct {
-	ID            int       `json:"id"`
-	Name          string    `json:"name"`
-	Endpoint      string    `json:"endpoint"`
-	TokenEndpoint string    `json:"token_endpoint,omitempty"`
-	Username      string    `json:"username,omitempty"`
-	Password      string    `json:"password,omitempty"`
-	Disabled      bool      `json:"disabled,omitempty"`
-	CreatedAt     time.Time `json:"-"`
+type EnvironmentStorage struct {
+	DB *sql.DB
 }
 
-type EnvironmentModel struct {
-	DB *sql.DB
+type Environment struct {
+	ID             int       `json:"id"`
+	Name           string    `json:"name"`
+	Endpoint       string    `json:"endpoint"`
+	TokenEndpoint  string    `json:"token_endpoint,omitempty"`
+	Username       string    `json:"username,omitempty"`
+	Password       string    `json:"password,omitempty"`
+	BasicAuthToken string    `json:"basic_auth_token,omitempty"`
+	Disabled       bool      `json:"disabled,omitempty"`
+	CreatedAt      time.Time `json:"-"`
 }
 
 // NewEnvironment creates a new Environment with the given options.
@@ -51,11 +52,11 @@ func NewEnvironment(name, endpoint string, options ...EnvironmentOption) *Enviro
 	return environment
 }
 
-func (m *EnvironmentModel) Ping() error {
+func (m *EnvironmentStorage) Ping() error {
 	return m.DB.Ping()
 }
 
-func (m *EnvironmentModel) Insert(environment *Environment) (int, error) {
+func (m *EnvironmentStorage) Insert(environment *Environment) (int, error) {
 	var (
 		environmentID  int
 		hashedPassword []byte
@@ -72,11 +73,11 @@ func (m *EnvironmentModel) Insert(environment *Environment) (int, error) {
 	err = transactions.WithTransaction(m.DB, func(tx transactions.Transaction) error {
 		stmt := `
 		INSERT INTO environments 
-			(name, endpoint, token_endpoint, username, password, disabled, created_at)
+			(name, endpoint, token_endpoint, username, password, basic_auth_token, disabled, created_at)
 		VALUES 
-			(?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
+			(?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
 		`
-		result, err := tx.Exec(stmt, environment.Name, environment.Endpoint, environment.TokenEndpoint, environment.Username, hashedPassword, environment.Disabled)
+		result, err := tx.Exec(stmt, environment.Name, environment.Endpoint, environment.TokenEndpoint, environment.Username, hashedPassword, environment.BasicAuthToken, environment.Disabled)
 		if err != nil {
 			return err
 		}
@@ -93,7 +94,7 @@ func (m *EnvironmentModel) Insert(environment *Environment) (int, error) {
 	return environmentID, err
 }
 
-func (m *EnvironmentModel) GetAll() ([]*Environment, error) {
+func (m *EnvironmentStorage) GetAll() ([]*Environment, error) {
 	var results []*Environment
 	environments := make(map[int]*Environment)
 
@@ -113,7 +114,7 @@ func (m *EnvironmentModel) GetAll() ([]*Environment, error) {
 	if err != nil {
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			return nil, ErrNoRecord
+			return nil, errors2.ErrNoRecord
 		default:
 			return nil, err
 		}
@@ -123,9 +124,7 @@ func (m *EnvironmentModel) GetAll() ([]*Environment, error) {
 	}(rows)
 
 	for rows.Next() {
-		var (
-			environment = &Environment{}
-		)
+		var environment = &Environment{}
 
 		err := rows.Scan(
 			&environment.ID,
@@ -159,44 +158,7 @@ func (m *EnvironmentModel) GetAll() ([]*Environment, error) {
 	return results, nil
 }
 
-func (m *EnvironmentModel) GetWithTx(tx transactions.Transaction, id int) (*Environment, error) {
-	environment := &Environment{}
-
-	stmt := `
-    SELECT 
-        id, 
-        name, 
-        endpoint,
-        token_endpoint,
-		disabled,
-		created_at
-    FROM 
-        environments 
-    WHERE 
-        id = ?
-`
-
-	err := tx.QueryRow(stmt, id).Scan(
-		&environment.ID,
-		&environment.Name,
-		&environment.Endpoint,
-		&environment.TokenEndpoint,
-		&environment.Disabled,
-		&environment.CreatedAt,
-	)
-	if err != nil {
-		switch {
-		case errors.Is(err, sql.ErrNoRows):
-			return nil, ErrNoRecord
-		default:
-			return nil, err
-		}
-	}
-
-	return environment, nil
-}
-
-func (m *EnvironmentModel) Get(id int) (*Environment, error) {
+func (m *EnvironmentStorage) Get(id int) (*Environment, error) {
 	tx, err := m.DB.Begin()
 	if err != nil {
 		return nil, err
@@ -207,18 +169,18 @@ func (m *EnvironmentModel) Get(id int) (*Environment, error) {
 		}
 	}()
 
-	return m.GetWithTx(tx, id)
+	return m.getWithTx(tx, id)
 }
 
-func (m *EnvironmentModel) Update(environment *Environment) error {
+func (m *EnvironmentStorage) Update(environment *Environment) error {
 	return transactions.WithTransaction(m.DB, func(tx transactions.Transaction) error {
-		existingEnvironment, err := m.GetWithTx(tx, environment.ID)
+		existingEnvironment, err := m.getWithTx(tx, environment.ID)
 		if err != nil {
 			return err
 		}
 
 		if existingEnvironment == nil {
-			return ErrNoRecord
+			return errors2.ErrNoRecord
 		}
 
 		hashedNewPassword, err := bcrypt.GenerateFromPassword([]byte(environment.Password), COST)
@@ -234,6 +196,7 @@ func (m *EnvironmentModel) Update(environment *Environment) error {
 			token_endpoint = ?,
 			username = ?,
 			password = ?,
+			basic_auth_token = ?,
 			disabled = ?
 		WHERE 
 			id = ?
@@ -245,6 +208,7 @@ func (m *EnvironmentModel) Update(environment *Environment) error {
 			environment.TokenEndpoint,
 			environment.Username,
 			hashedNewPassword,
+			environment.BasicAuthToken,
 			environment.Disabled,
 			environment.ID,
 		)
@@ -256,7 +220,7 @@ func (m *EnvironmentModel) Update(environment *Environment) error {
 	})
 }
 
-func (m *EnvironmentModel) Delete(id int) error {
+func (m *EnvironmentStorage) Delete(id int) error {
 	return transactions.WithTransaction(m.DB, func(tx transactions.Transaction) error {
 		stmt := `
 		DELETE FROM environments
@@ -273,9 +237,46 @@ func (m *EnvironmentModel) Delete(id int) error {
 		}
 
 		if rowsAffected == 0 {
-			return ErrNoRecord
+			return errors2.ErrNoRecord
 		}
 
 		return nil
 	})
+}
+
+func (m *EnvironmentStorage) getWithTx(tx transactions.Transaction, id int) (*Environment, error) {
+	environment := &Environment{}
+
+	stmt := `
+    SELECT 
+        id, 
+        name, 
+        endpoint,
+        token_endpoint,
+		disabled,
+		created_at
+    FROM 
+        environments 
+    WHERE 
+        id = ?
+	`
+
+	err := tx.QueryRow(stmt, id).Scan(
+		&environment.ID,
+		&environment.Name,
+		&environment.Endpoint,
+		&environment.TokenEndpoint,
+		&environment.Disabled,
+		&environment.CreatedAt,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, errors2.ErrNoRecord
+		default:
+			return nil, err
+		}
+	}
+
+	return environment, nil
 }

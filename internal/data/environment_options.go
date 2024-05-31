@@ -1,4 +1,4 @@
-package models
+package data
 
 type EnvironmentOption func(*Environment)
 

@@ -11,8 +11,9 @@ import (
 )
 
 type Credentials struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username       *string `json:"username"`
+	Password       *string `json:"password"`
+	BasicAuthToken *string `json:"basic_auth_token"`
 }
 
 type Token struct {
@@ -49,14 +50,19 @@ func (tm *TokenManager) GetToken() (string, error) {
 }
 
 func (tm *TokenManager) requestNewToken() (Token, error) {
-	url := tm.BaseURL + "/token"
+	url := tm.BaseURL + "/v2/oauth/token"
 
 	req, err := http.NewRequest("POST", url, nil)
 	if err != nil {
 		return Token{}, err
 	}
 
-	req.SetBasicAuth(tm.Credentials.Username, tm.Credentials.Password)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if tm.Credentials.Username != nil && tm.Credentials.Password != nil {
+		req.SetBasicAuth(*tm.Credentials.Username, *tm.Credentials.Password)
+	} else if tm.Credentials.BasicAuthToken != nil {
+		req.Header.Set("Authorization", "Basic "+*tm.Credentials.BasicAuthToken)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
