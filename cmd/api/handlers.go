@@ -3,8 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
+	"github.com/vladComan0/performance-analyzer/internal/custom_errors"
 	"github.com/vladComan0/performance-analyzer/internal/data"
-	errors2 "github.com/vladComan0/performance-analyzer/internal/errors"
 	"github.com/vladComan0/performance-analyzer/pkg/helpers"
 	"github.com/vladComan0/performance-analyzer/pkg/tokens"
 	"net/http"
@@ -88,7 +88,7 @@ func (app *application) getEnvironment(w http.ResponseWriter, r *http.Request) {
 	environment, err := app.environments.Get(id)
 	if err != nil {
 		switch {
-		case errors.Is(err, errors2.ErrNoRecord):
+		case errors.Is(err, custom_errors.ErrNoRecord):
 			app.helper.ClientError(w, http.StatusNotFound)
 		default:
 			app.helper.ServerError(w, err)
@@ -106,7 +106,7 @@ func (app *application) getAllEnvironments(w http.ResponseWriter, _ *http.Reques
 	environments, err := app.environments.GetAll()
 	if err != nil {
 		switch {
-		case errors.Is(err, errors2.ErrNoRecord):
+		case errors.Is(err, custom_errors.ErrNoRecord):
 			app.helper.ClientError(w, http.StatusNotFound)
 		default:
 			app.helper.ServerError(w, err)
@@ -131,7 +131,7 @@ func (app *application) updateEnvironment(w http.ResponseWriter, r *http.Request
 	environment, err := app.environments.Get(id)
 	if err != nil {
 		switch {
-		case errors.Is(err, errors2.ErrNoRecord):
+		case errors.Is(err, custom_errors.ErrNoRecord):
 			app.helper.ClientError(w, http.StatusNotFound)
 		default:
 			app.helper.ServerError(w, err)
@@ -204,7 +204,7 @@ func (app *application) deleteEnvironment(w http.ResponseWriter, r *http.Request
 
 	if err = app.environments.Delete(id); err != nil {
 		switch {
-		case errors.Is(err, errors2.ErrNoRecord):
+		case errors.Is(err, custom_errors.ErrNoRecord):
 			app.helper.ClientError(w, http.StatusNotFound)
 		default:
 			app.helper.ServerError(w, err)
@@ -236,7 +236,7 @@ func (app *application) createWorker(w http.ResponseWriter, r *http.Request) {
 	environment, err := app.environments.Get(input.EnvironmentID)
 	if err != nil {
 		switch {
-		case errors.Is(err, errors2.ErrNoRecord):
+		case errors.Is(err, custom_errors.ErrNoRecord):
 			app.helper.ClientError(w, http.StatusNotFound)
 		default:
 			app.helper.ServerError(w, err)
@@ -274,20 +274,26 @@ func (app *application) createWorker(w http.ResponseWriter, r *http.Request) {
 		options...,
 	)
 
-	wg := &sync.WaitGroup{}
-	go worker.Start(wg)
-
 	id, err := app.workers.Insert(worker)
 	if err != nil {
 		app.helper.ServerError(w, err)
 		return
 	}
 
-	worker, err = app.workers.Get(id)
+	// Fetch the worker details from the database using a dummy worker
+	workerFromDB, err := app.workers.Get(id)
 	if err != nil {
 		app.helper.ServerError(w, err)
 		return
 	}
+
+	// Update the original worker with the relevant fields
+	worker.ID = workerFromDB.ID
+	worker.Status = workerFromDB.Status
+	worker.CreatedAt = workerFromDB.CreatedAt
+
+	wg := &sync.WaitGroup{}
+	go worker.Start(wg, app.workers)
 
 	// Make the application aware of that new location -> add the headers to the right json helper function
 	headers := make(http.Header)
@@ -311,7 +317,7 @@ func (app *application) getWorker(w http.ResponseWriter, r *http.Request) {
 	worker, err := app.workers.Get(id)
 	if err != nil {
 		switch {
-		case errors.Is(err, errors2.ErrNoRecord):
+		case errors.Is(err, custom_errors.ErrNoRecord):
 			app.helper.ClientError(w, http.StatusNotFound)
 		default:
 			app.helper.ServerError(w, err)
@@ -329,7 +335,7 @@ func (app *application) getAllWorkers(w http.ResponseWriter, _ *http.Request) {
 	workers, err := app.workers.GetAll()
 	if err != nil {
 		switch {
-		case errors.Is(err, errors2.ErrNoRecord):
+		case errors.Is(err, custom_errors.ErrNoRecord):
 			app.helper.ClientError(w, http.StatusNotFound)
 		default:
 			app.helper.ServerError(w, err)

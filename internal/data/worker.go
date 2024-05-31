@@ -3,7 +3,7 @@ package data
 import (
 	"database/sql"
 	"errors"
-	errors2 "github.com/vladComan0/performance-analyzer/internal/errors"
+	"github.com/vladComan0/performance-analyzer/internal/custom_errors"
 	"github.com/vladComan0/performance-analyzer/pkg/tokens"
 	"github.com/vladComan0/tasty-byte/pkg/transactions"
 	"log"
@@ -17,6 +17,7 @@ type WorkerStorageInterface interface {
 	Insert(worker *Worker) (int, error)
 	Get(id int) (*Worker, error)
 	GetAll() ([]*Worker, error)
+	UpdateStatus(id int, status Status) error
 }
 
 type WorkerStorage struct {
@@ -24,18 +25,18 @@ type WorkerStorage struct {
 }
 
 type Worker struct {
-	ID              int       `json:"id"`
-	EnvironmentID   int       `json:"environment_id"`
-	Concurrency     int       `json:"concurrency"`
-	RequestsPerTask int       `json:"requests_per_task"`
-	Report          string    `json:"report"`
-	HTTPMethod      string    `json:"http_method"`
-	Status          Status    `json:"status"`
-	CreatedAt       time.Time `json:"-"`
+	ID              int                  `json:"id"`
+	EnvironmentID   int                  `json:"environment_id"`
+	Concurrency     int                  `json:"concurrency"`
+	RequestsPerTask int                  `json:"requests_per_task"`
+	Report          string               `json:"report"`
+	HTTPMethod      string               `json:"http_method"`
+	Status          Status               `json:"status"`
+	CreatedAt       time.Time            `json:"-"`
+	Environment     *Environment         `json:"-"`
+	TokenManager    *tokens.TokenManager `json:"-"`
 	infoLog         *log.Logger
 	errorLog        *log.Logger
-	Environment     *Environment
-	TokenManager    *tokens.TokenManager
 }
 
 // NewWorker creates a new Worker with the given options.
@@ -58,13 +59,23 @@ func NewWorker(environmentID, concurrency, requestsPerTask int, httpMethod strin
 	return worker
 }
 
-func (w *Worker) Start(wg *sync.WaitGroup) {
+func (w *Worker) Start(wg *sync.WaitGroup, workerStorage WorkerStorageInterface) {
+	if err := workerStorage.UpdateStatus(w.ID, StatusRunning); err != nil {
+		w.errorLog.Printf("Error updating status to running: %s", err)
+		return
+	}
 	w.SetStatus(StatusRunning)
+
 	for i := 0; i < w.Concurrency; i++ {
 		wg.Add(1)
 		go w.run(wg)
 	}
 	wg.Wait()
+
+	if err := workerStorage.UpdateStatus(w.ID, StatusFinished); err != nil {
+		w.errorLog.Printf("Error updating status to finished: %s", err)
+		return
+	}
 	w.SetStatus(StatusFinished)
 }
 
@@ -123,7 +134,7 @@ func (m *WorkerStorage) Insert(worker *Worker) (int, error) {
 		INSERT INTO workers (environment_id, concurrency, requests_per_task, report, http_method, status, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
 		`
-		result, err := tx.Exec(stmt, worker.EnvironmentID, worker.Concurrency, worker.RequestsPerTask, worker.Report, worker.HTTPMethod, worker.Status)
+		result, err := tx.Exec(stmt, worker.EnvironmentID, worker.Concurrency, worker.RequestsPerTask, worker.Report, worker.HTTPMethod, StatusCreated)
 		if err != nil {
 			return err
 		}
@@ -161,7 +172,7 @@ func (m *WorkerStorage) GetAll() ([]*Worker, error) {
 	if err != nil {
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			return nil, errors2.ErrNoRecord
+			return nil, custom_errors.ErrNoRecord
 		default:
 			return nil, err
 		}
@@ -252,11 +263,30 @@ func (m *WorkerStorage) getWithTx(tx transactions.Transaction, id int) (*Worker,
 	if err != nil {
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			return nil, errors2.ErrNoRecord
+			return nil, custom_errors.ErrNoRecord
 		default:
 			return nil, err
 		}
 	}
 
 	return worker, nil
+}
+
+func (m *WorkerStorage) UpdateStatus(id int, newStatus Status) error {
+	err := transactions.WithTransaction(m.DB, func(tx transactions.Transaction) error {
+		stmt := `
+		UPDATE workers
+		SET status = ?
+		WHERE id = ?
+		`
+
+		_, err := tx.Exec(stmt, newStatus, id)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	return err
 }

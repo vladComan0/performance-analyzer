@@ -3,7 +3,7 @@ package data
 import (
 	"database/sql"
 	"errors"
-	errors2 "github.com/vladComan0/performance-analyzer/internal/errors"
+	"github.com/vladComan0/performance-analyzer/internal/custom_errors"
 	"github.com/vladComan0/tasty-byte/pkg/transactions"
 	"golang.org/x/crypto/bcrypt"
 	"log"
@@ -114,7 +114,7 @@ func (m *EnvironmentStorage) GetAll() ([]*Environment, error) {
 	if err != nil {
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			return nil, errors2.ErrNoRecord
+			return nil, custom_errors.ErrNoRecord
 		default:
 			return nil, err
 		}
@@ -180,7 +180,7 @@ func (m *EnvironmentStorage) Update(environment *Environment) error {
 		}
 
 		if existingEnvironment == nil {
-			return errors2.ErrNoRecord
+			return custom_errors.ErrNoRecord
 		}
 
 		hashedNewPassword, err := bcrypt.GenerateFromPassword([]byte(environment.Password), COST)
@@ -237,7 +237,7 @@ func (m *EnvironmentStorage) Delete(id int) error {
 		}
 
 		if rowsAffected == 0 {
-			return errors2.ErrNoRecord
+			return custom_errors.ErrNoRecord
 		}
 
 		return nil
@@ -272,7 +272,7 @@ func (m *EnvironmentStorage) getWithTx(tx transactions.Transaction, id int) (*En
 	if err != nil {
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			return nil, errors2.ErrNoRecord
+			return nil, custom_errors.ErrNoRecord
 		default:
 			return nil, err
 		}
