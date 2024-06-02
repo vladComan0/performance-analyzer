@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 	"github.com/vladComan0/performance-analyzer/internal/data"
 	"github.com/vladComan0/performance-analyzer/pkg/helpers"
@@ -38,21 +39,19 @@ type application struct {
 }
 
 func main() {
-	var cfg config
+	cfg := getConfig()
 
-	log := zerolog.New(os.Stdout).With().Timestamp().Logger()
-	getConfig(log, &cfg)
-	log = configureLogger(cfg, log)
+	logger := configureLogger(cfg)
 
 	db, err := openDB(cfg.DSN)
 	if err != nil {
-		log.Fatal().Err(err)
+		logger.Fatal().Err(err)
 	}
 	defer func() {
 		_ = db.Close()
 	}()
 
-	helper := helpers.NewHelper(log, cfg.DebugEnabled)
+	helper := helpers.NewHelper(logger, cfg.DebugEnabled)
 
 	environmentModel := &data.EnvironmentStorage{
 		DB: db,
@@ -62,15 +61,27 @@ func main() {
 		DB: db,
 	}
 
-	// dependency injection
-	app := &application{
-		environments: environmentModel,
-		workers:      workerModel,
+	app := newApplication(environmentModel, workerModel, cfg, helper, logger)
+
+	server := newServer(cfg, app)
+
+	log.Info().Msgf("Starting server on port: %s", strings.Split(server.Addr, ":")[1])
+	//err := server.ListenAndServeTLS("./tls/cert.pem", "./tls/key.pem")
+	err = server.ListenAndServe()
+	logger.Fatal().Err(err)
+}
+
+func newApplication(env data.EnvironmentStorageInterface, worker data.WorkerStorageInterface, cfg config, helper *helpers.Helper, log zerolog.Logger) *application {
+	return &application{
+		environments: env,
+		workers:      worker,
 		config:       cfg,
 		helper:       helper,
 		log:          log,
 	}
+}
 
+func newServer(cfg config, app *application) *http.Server {
 	tlsConfig := &tls.Config{
 		CurvePreferences: []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
 		CipherSuites: []uint16{
@@ -83,7 +94,7 @@ func main() {
 		},
 	}
 
-	server := &http.Server{
+	return &http.Server{
 		Addr:         cfg.Addr,
 		Handler:      app.routes(),
 		IdleTimeout:  time.Minute,
@@ -91,14 +102,10 @@ func main() {
 		WriteTimeout: 10 * time.Second,
 		TLSConfig:    tlsConfig,
 	}
-
-	log.Info().Msgf("Starting server on port: %s", strings.Split(server.Addr, ":")[1])
-	//err := server.ListenAndServeTLS("./tls/cert.pem", "./tls/key.pem")
-	err = server.ListenAndServe()
-	log.Fatal().Err(err)
 }
 
-func getConfig(log zerolog.Logger, config *config) {
+func getConfig() config {
+	var cfg config
 	viper.SetConfigName("config")
 	viper.AddConfigPath(".")
 	viper.SetConfigType("yaml")
@@ -106,9 +113,11 @@ func getConfig(log zerolog.Logger, config *config) {
 		log.Fatal().Err(err).Msg("Error reading config file")
 	}
 
-	if err := viper.Unmarshal(config); err != nil {
+	if err := viper.Unmarshal(&cfg); err != nil {
 		log.Fatal().Err(err).Msg("Unable to decode into struct")
 	}
+
+	return cfg
 }
 
 func openDB(dsn string) (*sql.DB, error) {
@@ -122,26 +131,28 @@ func openDB(dsn string) (*sql.DB, error) {
 	return db, nil
 }
 
-func configureLogger(cfg config, log zerolog.Logger) zerolog.Logger {
+func configureLogger(cfg config) zerolog.Logger {
+	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
+
 	var logLevel zerolog.Level
 
 	if cfg.Log.Level == "" {
-		log.Info().Msg("Log level is not set, defaulting to info")
+		logger.Info().Msg("Log level is not set, defaulting to info")
 		logLevel = zerolog.InfoLevel
 	} else {
 		var err error
 		logLevel, err = zerolog.ParseLevel(cfg.Log.Level)
 		if err != nil {
-			log.Warn().Msgf("Invalid log level %q, defaulting to info", cfg.Log.Level)
+			logger.Warn().Msgf("Invalid log level %q, defaulting to info", cfg.Log.Level)
 			logLevel = zerolog.InfoLevel
 		}
 	}
-	log = log.Level(logLevel)
+	logger = log.Level(logLevel)
 
 	if cfg.Log.Colorized {
 		output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
-		log = log.Output(output)
+		logger = log.Output(output)
 	}
 
-	return log
+	return logger
 }
