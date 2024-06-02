@@ -268,6 +268,7 @@ func (app *application) createWorker(w http.ResponseWriter, r *http.Request) {
 		input.Concurrency,
 		input.RequestsPerTask,
 		input.HTTPMethod,
+		input.Body,
 		environment,
 		app.infoLog,
 		app.errorLog,
@@ -293,7 +294,7 @@ func (app *application) createWorker(w http.ResponseWriter, r *http.Request) {
 	worker.CreatedAt = workerFromDB.CreatedAt
 
 	wg := &sync.WaitGroup{}
-	go worker.Start(wg, app.workers)
+	go worker.Start(wg, app.workers.UpdateStatus)
 
 	// Make the application aware of that new location -> add the headers to the right json helper function
 	headers := make(http.Header)

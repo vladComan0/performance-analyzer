@@ -5,6 +5,7 @@ go 1.22.2
 require (
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/justinas/alice v1.2.0
+	github.com/montanaflynn/stats v0.7.1
 	github.com/rs/cors v1.11.0
 	github.com/spf13/viper v1.18.2
 	github.com/vladComan0/tasty-byte v1.1.0

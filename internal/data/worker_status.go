@@ -9,6 +9,8 @@ const (
 )
 
 func (w *Worker) SetStatus(s Status) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	switch s {
 	case StatusCreated, StatusRunning, StatusFinished:
 		w.Status = s
