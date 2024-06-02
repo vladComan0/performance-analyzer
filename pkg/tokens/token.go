@@ -3,8 +3,8 @@ package tokens
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/rs/zerolog"
 	"io"
-	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -25,6 +25,7 @@ type TokenManager struct {
 	Token       Token
 	Credentials Credentials
 	BaseURL     string
+	Log         zerolog.Logger
 	mu          sync.Mutex
 }
 
@@ -71,7 +72,7 @@ func (tm *TokenManager) requestNewToken() (Token, error) {
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			log.Println(err)
+			tm.Log.Error().Err(err).Msg("Failed to close response body")
 		}
 	}(resp.Body)
 

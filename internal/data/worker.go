@@ -1,14 +1,13 @@
 package data
 
 import (
-	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/rs/zerolog"
 	"github.com/vladComan0/performance-analyzer/internal/custom_errors"
 	"github.com/vladComan0/performance-analyzer/pkg/tokens"
 	"github.com/vladComan0/tasty-byte/pkg/transactions"
-	"log"
 	"net/http"
 	"sort"
 	"sync"
@@ -39,13 +38,12 @@ type Worker struct {
 	Metrics         *Metrics             `json:"-"`
 	Environment     *Environment         `json:"-"`
 	TokenManager    *tokens.TokenManager `json:"-"`
-	infoLog         *log.Logger
-	errorLog        *log.Logger
+	log             zerolog.Logger
 	mu              sync.Mutex
 }
 
 // NewWorker creates a new Worker with the given options.
-func NewWorker(environmentID, concurrency, requestsPerTask int, httpMethod string, body *json.RawMessage, environment *Environment, infoLog *log.Logger, errorLog *log.Logger, options ...WorkerOption) *Worker {
+func NewWorker(environmentID, concurrency, requestsPerTask int, httpMethod string, body *json.RawMessage, environment *Environment, log zerolog.Logger, options ...WorkerOption) *Worker {
 	worker := &Worker{
 		EnvironmentID:   environmentID,
 		Concurrency:     concurrency,
@@ -55,8 +53,7 @@ func NewWorker(environmentID, concurrency, requestsPerTask int, httpMethod strin
 		Body:            body,
 		Status:          StatusCreated,
 		Metrics:         NewMetrics(),
-		infoLog:         infoLog,
-		errorLog:        errorLog,
+		log:             log,
 	}
 
 	for _, option := range options {
@@ -68,7 +65,7 @@ func NewWorker(environmentID, concurrency, requestsPerTask int, httpMethod strin
 
 func (w *Worker) Start(wg *sync.WaitGroup, updateFunc func(id int, status Status) error) {
 	if err := updateFunc(w.ID, StatusRunning); err != nil {
-		w.errorLog.Printf("Error updating status to running: %s", err)
+		w.log.Error().Err(err).Msg("Error updating status to running")
 		return
 	}
 	w.SetStatus(StatusRunning)
@@ -80,25 +77,28 @@ func (w *Worker) Start(wg *sync.WaitGroup, updateFunc func(id int, status Status
 	wg.Wait()
 
 	if err := updateFunc(w.ID, StatusFinished); err != nil {
-		w.errorLog.Printf("Error updating status to finished: %s", err)
+		w.log.Error().Err(err).Msg("Error updating status to finished")
 		return
 	}
 	w.SetStatus(StatusFinished)
 
 	ranks := []float64{50, 95, 99, 99.9}
 	if err := w.Metrics.CalculatePercentiles(ranks...); err != nil {
-		w.errorLog.Printf("Error calculating Percentiles: %s", err)
+		w.log.Error().Err(err).Msg("Error calculating Percentiles")
 		return
 	}
 
-	w.infoLog.Printf("p50 latency: %.6f s", w.Metrics.Percentiles[50]/1e9)
-	w.infoLog.Printf("p95 latency: %.6f s", w.Metrics.Percentiles[95]/1e9)
-	w.infoLog.Printf("p99 latency: %.6f s", w.Metrics.Percentiles[99]/1e9)
-	w.infoLog.Printf("p999 latency: %.6f s", w.Metrics.Percentiles[99.9]/1e9)
+	w.log.Info().Msgf("p50 latency: %.6f s", w.Metrics.Percentiles[50]/1e9)
+	w.log.Info().Msgf("p95 latency: %.6f s", w.Metrics.Percentiles[95]/1e9)
+	w.log.Info().Msgf("p99 latency: %.6f s", w.Metrics.Percentiles[99]/1e9)
+	w.log.Info().Msgf("p999 latency: %.6f s", w.Metrics.Percentiles[99.9]/1e9)
 
 	w.Metrics.CalculateMaxLatency()
-	w.infoLog.Printf("Max latency: %.6f s", float64(w.Metrics.MaxLatency)/1e9)
-	w.infoLog.Printf("Error rate: %.2f%%", 100*w.Metrics.CalculateErrorRate())
+
+	w.log.Info().Msgf("Max latency: %.6f s", float64(w.Metrics.MaxLatency)/1e9)
+	w.log.Info().Msgf("Total requests: %d", w.Metrics.TotalRequests)
+	w.log.Info().Msgf("Failed requests: %d", w.Metrics.FailedRequests)
+	w.log.Info().Msgf("Error rate: %.2f%%", 100*w.Metrics.CalculateErrorRate())
 }
 
 func (w *Worker) run(wg *sync.WaitGroup) {
@@ -117,9 +117,11 @@ func (w *Worker) get(url string) {
 	client := &http.Client{}
 	req, err := w.createRequest("GET", url)
 	if err != nil {
-		w.errorLog.Printf("Error creating request with HTTP method %s on the URL %s: %s", w.HTTPMethod, url, err)
+		w.log.Error().Err(err).Msgf("Error creating request with HTTP method %s on the URL %s", w.HTTPMethod, url)
 		return
 	}
+
+	w.log.Debug().Msgf("Sending request to: %s", url)
 
 	start := time.Now()
 	resp, err := client.Do(req)
@@ -127,44 +129,35 @@ func (w *Worker) get(url string) {
 	w.Metrics.IncrementTotalRequests()
 
 	if err != nil {
-		w.errorLog.Printf("Error sending request with HTTP method %s to %s: %s", w.HTTPMethod, url, err)
+		w.log.Error().Err(err).Msgf("Error sending request with HTTP method %s on the URL %s", w.HTTPMethod, url)
 		w.Metrics.IncrementFailedRequests()
 		return
 	}
 	defer resp.Body.Close()
+
+	w.log.Debug().Msgf("Response status code: %s", resp.Status)
 
 	w.Metrics.AddLatency(latency)
 }
 
 func (w *Worker) post(url string) {
 	client := &http.Client{}
-	req, err := http.NewRequest("POST", url, bytes.NewReader(*w.Body))
+	req, err := w.createRequest("GET", url)
 	if err != nil {
-		w.errorLog.Printf("Error creating request with HTTP method %s on the URL %s: %s", w.HTTPMethod, url, err)
+		w.log.Error().Err(err).Msgf("Error creating request with HTTP method %s on the URL %s", w.HTTPMethod, url)
 		return
 	}
 
-	if w.TokenManager != nil {
-		token, err := w.TokenManager.GetToken()
-		if err != nil {
-			w.errorLog.Printf("Error fetching token on the URL %s: %s ", w.Environment.TokenEndpoint, err)
-			return
-		}
-		w.infoLog.Printf("Token: %s", token)
-		req.Header.Add("Authorization", "Bearer "+token)
-	}
-
-	req.Header.Add("Content-Type", "application/json")
-
-	w.infoLog.Printf("Sending request to: %s", url)
+	w.log.Debug().Msgf("Sending request to: %s", url)
 
 	resp, err := client.Do(req)
 	if err != nil {
-		w.errorLog.Printf("Error sending request with HTTP method %s to %s: %s", w.HTTPMethod, url, err)
+		w.log.Error().Err(err).Msgf("Error sending request with HTTP method %s on the URL %s", w.HTTPMethod, url)
 		return
 	}
 	defer resp.Body.Close()
-	log.Printf("Status code: %d", resp.StatusCode)
+
+	w.log.Debug().Msgf("Response status code: %s", resp.Status)
 }
 
 func (w *Worker) createRequest(method, url string) (*http.Request, error) {
@@ -176,10 +169,10 @@ func (w *Worker) createRequest(method, url string) (*http.Request, error) {
 	if w.TokenManager != nil {
 		token, err := w.TokenManager.GetToken()
 		if err != nil {
-			w.errorLog.Printf("Error fetching token on the URL %s: %s ", w.Environment.TokenEndpoint, err)
+			w.log.Error().Err(err).Msgf("Error fetching token on the URL %s", w.Environment.TokenEndpoint)
 			return nil, err
 		}
-		w.infoLog.Printf("Token: %s", token)
+		w.log.Debug().Msgf("Token: %s", token)
 		req.Header.Add("Authorization", "Bearer "+token)
 	}
 
@@ -282,17 +275,14 @@ func (m *WorkerStorage) GetAll() ([]*Worker, error) {
 }
 
 func (m *WorkerStorage) Get(id int) (*Worker, error) {
-	tx, err := m.DB.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if err := tx.Rollback(); err != nil {
-			log.Printf("could not rollback %v", err)
-		}
-	}()
+	var worker *Worker
 
-	return m.getWithTx(tx, id)
+	err := transactions.WithTransaction(m.DB, func(tx transactions.Transaction) (err error) {
+		worker, err = m.getWithTx(tx, id)
+		return err
+	})
+
+	return worker, err
 }
 
 func (m *WorkerStorage) getWithTx(tx transactions.Transaction, id int) (*Worker, error) {

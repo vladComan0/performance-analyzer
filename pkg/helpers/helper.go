@@ -4,23 +4,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/rs/zerolog"
 	"io"
-	"log"
 	"net/http"
 	"runtime/debug"
 	"strconv"
 )
 
 type Helper struct {
-	InfoLog      *log.Logger
-	ErrorLog     *log.Logger
+	Log          zerolog.Logger
 	DebugEnabled bool
 }
 
-func NewHelper(infoLog *log.Logger, errorLog *log.Logger, debugEnabled bool) *Helper {
+func NewHelper(log zerolog.Logger, debugEnabled bool) *Helper {
 	return &Helper{
-		InfoLog:      infoLog,
-		ErrorLog:     errorLog,
+		Log:          log,
 		DebugEnabled: debugEnabled,
 	}
 }
@@ -33,7 +31,7 @@ func (h *Helper) ClientError(w http.ResponseWriter, status int) {
 
 func (h *Helper) ServerError(w http.ResponseWriter, err error) {
 	trace := fmt.Sprintf("%s\n%s", err.Error(), debug.Stack())
-	_ = h.ErrorLog.Output(2, trace)
+	h.Log.Err(errors.New(trace)).Send()
 	if h.DebugEnabled {
 		http.Error(w, trace, http.StatusInternalServerError)
 	}

@@ -6,7 +6,6 @@ import (
 	"github.com/vladComan0/performance-analyzer/internal/custom_errors"
 	"github.com/vladComan0/tasty-byte/pkg/transactions"
 	"golang.org/x/crypto/bcrypt"
-	"log"
 	"sort"
 	"time"
 )
@@ -159,17 +158,14 @@ func (m *EnvironmentStorage) GetAll() ([]*Environment, error) {
 }
 
 func (m *EnvironmentStorage) Get(id int) (*Environment, error) {
-	tx, err := m.DB.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if err := tx.Rollback(); err != nil {
-			log.Printf("could not rollback %v", err)
-		}
-	}()
+	var environment *Environment
 
-	return m.getWithTx(tx, id)
+	err := transactions.WithTransaction(m.DB, func(tx transactions.Transaction) (err error) {
+		environment, err = m.getWithTx(tx, id)
+		return err
+	})
+
+	return environment, err
 }
 
 func (m *EnvironmentStorage) Update(environment *Environment) error {

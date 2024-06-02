@@ -15,8 +15,7 @@ func (w *Worker) SetStatus(s Status) {
 	case StatusCreated, StatusRunning, StatusFinished:
 		w.Status = s
 	default:
-
-		w.errorLog.Printf("invalid status: %v", s)
+		w.log.Error().Msgf("invalid status: %v", s)
 	}
 }
 

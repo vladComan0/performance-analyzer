@@ -3,10 +3,10 @@ package main
 import (
 	"crypto/tls"
 	"database/sql"
+	"github.com/rs/zerolog"
 	"github.com/spf13/viper"
 	"github.com/vladComan0/performance-analyzer/internal/data"
 	"github.com/vladComan0/performance-analyzer/pkg/helpers"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -16,11 +16,17 @@ import (
 )
 
 type config struct {
-	Addr           string   `mapstructure:"addr"`
-	Environment    string   `mapstructure:"environment"`
-	DSN            string   `mapstructure:"dsn"`
-	DebugEnabled   bool     `mapstructure:"debug_enabled"`
-	AllowedOrigins []string `mapstructure:"allowed_origins"`
+	Addr           string    `mapstructure:"addr"`
+	Environment    string    `mapstructure:"environment"`
+	DSN            string    `mapstructure:"dsn"`
+	DebugEnabled   bool      `mapstructure:"debug_enabled"`
+	AllowedOrigins []string  `mapstructure:"allowed_origins"`
+	Log            logConfig `mapstructure:"log"`
+}
+
+type logConfig struct {
+	Level     string `mapstructure:"level"`
+	Colorized bool   `mapstructure:"colorized"`
 }
 
 type application struct {
@@ -28,27 +34,25 @@ type application struct {
 	workers      data.WorkerStorageInterface
 	config       config
 	helper       *helpers.Helper
-	infoLog      *log.Logger
-	errorLog     *log.Logger
+	log          zerolog.Logger
 }
 
 func main() {
 	var cfg config
 
-	infoLog := log.New(os.Stdout, "INFO\t", log.Ldate|log.Ltime)
-	errorLog := log.New(os.Stderr, "ERROR\t", log.Ldate|log.Ltime|log.Lshortfile)
-
-	getConfig(errorLog, &cfg)
+	log := zerolog.New(os.Stdout).With().Timestamp().Logger()
+	getConfig(log, &cfg)
+	log = configureLogger(cfg, log)
 
 	db, err := openDB(cfg.DSN)
 	if err != nil {
-		errorLog.Fatal(err)
+		log.Fatal().Err(err)
 	}
 	defer func() {
 		_ = db.Close()
 	}()
 
-	helper := helpers.NewHelper(infoLog, errorLog, cfg.DebugEnabled)
+	helper := helpers.NewHelper(log, cfg.DebugEnabled)
 
 	environmentModel := &data.EnvironmentStorage{
 		DB: db,
@@ -64,8 +68,7 @@ func main() {
 		workers:      workerModel,
 		config:       cfg,
 		helper:       helper,
-		infoLog:      infoLog,
-		errorLog:     errorLog,
+		log:          log,
 	}
 
 	tlsConfig := &tls.Config{
@@ -89,22 +92,22 @@ func main() {
 		TLSConfig:    tlsConfig,
 	}
 
-	infoLog.Printf("Starting server on port: %s", strings.Split(server.Addr, ":")[1])
+	log.Info().Msgf("Starting server on port: %s", strings.Split(server.Addr, ":")[1])
 	//err := server.ListenAndServeTLS("./tls/cert.pem", "./tls/key.pem")
 	err = server.ListenAndServe()
-	errorLog.Fatal(err)
+	log.Fatal().Err(err)
 }
 
-func getConfig(errorLog *log.Logger, config *config) {
+func getConfig(log zerolog.Logger, config *config) {
 	viper.SetConfigName("config")
 	viper.AddConfigPath(".")
 	viper.SetConfigType("yaml")
 	if err := viper.ReadInConfig(); err != nil {
-		errorLog.Fatalf("Error reading config file, %s", err)
+		log.Fatal().Err(err).Msg("Error reading config file")
 	}
 
 	if err := viper.Unmarshal(config); err != nil {
-		errorLog.Fatalf("Unable to decode into struct, %v", err)
+		log.Fatal().Err(err).Msg("Unable to decode into struct")
 	}
 }
 
@@ -117,4 +120,28 @@ func openDB(dsn string) (*sql.DB, error) {
 		return nil, err
 	}
 	return db, nil
+}
+
+func configureLogger(cfg config, log zerolog.Logger) zerolog.Logger {
+	var logLevel zerolog.Level
+
+	if cfg.Log.Level == "" {
+		log.Info().Msg("Log level is not set, defaulting to info")
+		logLevel = zerolog.InfoLevel
+	} else {
+		var err error
+		logLevel, err = zerolog.ParseLevel(cfg.Log.Level)
+		if err != nil {
+			log.Warn().Msgf("Invalid log level %q, defaulting to info", cfg.Log.Level)
+			logLevel = zerolog.InfoLevel
+		}
+	}
+	log = log.Level(logLevel)
+
+	if cfg.Log.Colorized {
+		output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
+		log = log.Output(output)
+	}
+
+	return log
 }

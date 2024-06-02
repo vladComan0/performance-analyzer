@@ -75,7 +75,7 @@ func (app *application) createEnvironment(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	app.infoLog.Printf("Created new environment with id: %d", id)
+	app.log.Info().Msgf("Created new environment with id: %d", id)
 }
 
 func (app *application) getEnvironment(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +118,8 @@ func (app *application) getAllEnvironments(w http.ResponseWriter, _ *http.Reques
 		app.helper.ServerError(w, err)
 		return
 	}
-	app.infoLog.Printf("Retrieved all environments")
+
+	app.log.Info().Msgf("Retrieved all environments")
 }
 
 func (app *application) updateEnvironment(w http.ResponseWriter, r *http.Request) {
@@ -217,7 +218,7 @@ func (app *application) deleteEnvironment(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	app.infoLog.Printf("Deleted environment with id: %d", id)
+	app.log.Info().Msgf("Deleted environment with id: %d", id)
 }
 
 func (app *application) createWorker(w http.ResponseWriter, r *http.Request) {
@@ -270,8 +271,7 @@ func (app *application) createWorker(w http.ResponseWriter, r *http.Request) {
 		input.HTTPMethod,
 		input.Body,
 		environment,
-		app.infoLog,
-		app.errorLog,
+		app.log,
 		options...,
 	)
 
@@ -305,7 +305,7 @@ func (app *application) createWorker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	app.infoLog.Printf("Created new worker with id: %d", id)
+	app.log.Info().Msgf("Created new worker with id: %d", id)
 }
 
 func (app *application) getWorker(w http.ResponseWriter, r *http.Request) {
