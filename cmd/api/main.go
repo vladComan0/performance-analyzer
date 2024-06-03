@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"github.com/spf13/viper"
+	"github.com/vladComan0/performance-analyzer/internal/config"
 	"github.com/vladComan0/performance-analyzer/internal/data"
 	"github.com/vladComan0/performance-analyzer/internal/service"
 	"github.com/vladComan0/performance-analyzer/pkg/helpers"
@@ -17,30 +17,16 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
-type config struct {
-	Addr           string    `mapstructure:"addr"`
-	Environment    string    `mapstructure:"environment"`
-	DSN            string    `mapstructure:"dsn"`
-	DebugEnabled   bool      `mapstructure:"debug_enabled"`
-	AllowedOrigins []string  `mapstructure:"allowed_origins"`
-	Log            logConfig `mapstructure:"log"`
-}
-
-type logConfig struct {
-	Level     string `mapstructure:"level"`
-	Colorized bool   `mapstructure:"colorized"`
-}
-
 type application struct {
 	environmentService service.EnvironmentService
 	workerService      service.WorkerService
-	config             config
+	config             config.Config
 	helper             *helpers.Helper
 	log                zerolog.Logger
 }
 
 func main() {
-	cfg := getConfig()
+	cfg := config.GetConfig()
 
 	logger := configureLogger(cfg)
 
@@ -66,13 +52,13 @@ func main() {
 
 	server := newServer(cfg, app)
 
-	log.Info().Msgf("Starting server on port: %s", strings.Split(server.Addr, ":")[1])
+	logger.Info().Msgf("Starting server on port: %s", strings.Split(server.Addr, ":")[1])
 	//err := server.ListenAndServeTLS("./tls/cert.pem", "./tls/key.pem")
 	err = server.ListenAndServe()
 	logger.Fatal().Err(err)
 }
 
-func newApplication(environmentService service.EnvironmentService, workerService service.WorkerService, cfg config, helper *helpers.Helper, log zerolog.Logger) *application {
+func newApplication(environmentService service.EnvironmentService, workerService service.WorkerService, cfg config.Config, helper *helpers.Helper, log zerolog.Logger) *application {
 	return &application{
 		environmentService: environmentService,
 		workerService:      workerService,
@@ -82,7 +68,7 @@ func newApplication(environmentService service.EnvironmentService, workerService
 	}
 }
 
-func newServer(cfg config, app *application) *http.Server {
+func newServer(cfg config.Config, app *application) *http.Server {
 	tlsConfig := &tls.Config{
 		CurvePreferences: []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
 		CipherSuites: []uint16{
@@ -105,22 +91,6 @@ func newServer(cfg config, app *application) *http.Server {
 	}
 }
 
-func getConfig() config {
-	var cfg config
-	viper.SetConfigName("config")
-	viper.AddConfigPath(".")
-	viper.SetConfigType("yaml")
-	if err := viper.ReadInConfig(); err != nil {
-		log.Fatal().Err(err).Msg("Error reading config file")
-	}
-
-	if err := viper.Unmarshal(&cfg); err != nil {
-		log.Fatal().Err(err).Msg("Unable to decode into struct")
-	}
-
-	return cfg
-}
-
 func openDB(dsn string) (*sql.DB, error) {
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
@@ -132,7 +102,7 @@ func openDB(dsn string) (*sql.DB, error) {
 	return db, nil
 }
 
-func configureLogger(cfg config) zerolog.Logger {
+func configureLogger(cfg config.Config) zerolog.Logger {
 	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
 
 	var logLevel zerolog.Level
@@ -150,7 +120,7 @@ func configureLogger(cfg config) zerolog.Logger {
 	}
 	logger = log.Level(logLevel)
 
-	if cfg.Log.Colorized {
+	if cfg.Log.HumanReadable {
 		output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
 		logger = log.Output(output)
 	}
