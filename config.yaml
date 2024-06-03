@@ -6,4 +6,4 @@ allowedOrigins: []
 dsn: "evaluator_user:$up3r$3cur3pa$$word@tcp(localhost:3306)/performance_evaluator?parseTime=true"
 log:
   level: "info"
-  colorized: true
+  human_readable: true

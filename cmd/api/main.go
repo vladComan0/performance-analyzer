@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"github.com/vladComan0/performance-analyzer/internal/config"
 	"github.com/vladComan0/performance-analyzer/internal/data"
 	"github.com/vladComan0/performance-analyzer/internal/service"
@@ -118,11 +117,11 @@ func configureLogger(cfg config.Config) zerolog.Logger {
 			logLevel = zerolog.InfoLevel
 		}
 	}
-	logger = log.Level(logLevel)
+	logger = logger.Level(logLevel)
 
 	if cfg.Log.HumanReadable {
 		output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
-		logger = log.Output(output)
+		logger = logger.Output(output)
 	}
 
 	return logger

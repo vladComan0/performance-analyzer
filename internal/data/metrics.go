@@ -2,24 +2,35 @@ package data
 
 import (
 	"github.com/montanaflynn/stats"
+	"strconv"
 	"sync"
 	"time"
 )
 
 type Metrics struct {
-	MaxLatency     time.Duration       `json:"max_latency,omitempty"`
-	Percentiles    map[float64]float64 `json:"Percentiles,omitempty"`
-	TotalRequests  int                 `json:"total_requests,omitempty"`
-	FailedRequests int                 `json:"failed_requests,omitempty"`
+	MaxLatency     float64                    `json:"max_latency"` // in seconds
+	Percentiles    map[PercentileRank]float64 `json:"percentiles"` // in seconds
+	TotalRequests  int                        `json:"total_requests"`
+	FailedRequests int                        `json:"failed_requests"`
+	ErrorRate      float64                    `json:"error_rate"`
 	latencies      []time.Duration
 	mu             sync.Mutex
 }
 
 func NewMetrics() *Metrics {
 	return &Metrics{
-		Percentiles: make(map[float64]float64),
+		Percentiles: make(map[PercentileRank]float64),
 	}
 }
+
+type PercentileRank string
+
+const (
+	P50  PercentileRank = "50"
+	P95  PercentileRank = "95"
+	P99  PercentileRank = "99"
+	P999 PercentileRank = "99.9"
+)
 
 func (m *Metrics) AddLatency(latency time.Duration) {
 	m.mu.Lock()
@@ -36,20 +47,24 @@ func (m *Metrics) CalculateMaxLatency() {
 	for _, latency := range m.latencies {
 		maximum = max(maximum, latency)
 	}
-	m.MaxLatency = maximum
+	m.MaxLatency = float64(maximum) / float64(time.Second)
 }
 
-func (m *Metrics) CalculatePercentiles(percentileRanks ...float64) error {
+func (m *Metrics) CalculatePercentiles(percentileRanks ...PercentileRank) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	latencies := make([]float64, len(m.latencies))
 	for i, latency := range m.latencies {
-		latencies[i] = float64(latency)
+		latencies[i] = float64(latency) / float64(time.Second)
 	}
 
 	for _, rank := range percentileRanks {
-		result, err := calculatePercentile(latencies, rank)
+		rankFloat, err := strconv.ParseFloat(string(rank), 64)
+		if err != nil {
+			return err
+		}
+		result, err := calculatePercentile(latencies, rankFloat)
 		if err != nil {
 			return err
 		}
@@ -79,13 +94,14 @@ func (m *Metrics) IncrementFailedRequests() {
 	m.FailedRequests++
 }
 
-func (m *Metrics) CalculateErrorRate() float64 {
+func (m *Metrics) CalculateErrorRate() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.TotalRequests == 0 {
-		return 0
+		m.ErrorRate = 0
+		return
 	}
 
-	return float64(m.FailedRequests) / float64(m.TotalRequests)
+	m.ErrorRate = float64(m.FailedRequests) / float64(m.TotalRequests)
 }

@@ -80,7 +80,7 @@ func (s *WorkerServiceImpl) CreateWorker(input *data.Worker) (*data.Worker, erro
 	worker.CreatedAt = workerFromDB.CreatedAt
 
 	wg := &sync.WaitGroup{}
-	go worker.Start(wg, s.workerRepo.UpdateStatus)
+	go worker.Start(wg, s.workerRepo.UpdateStatus, s.workerRepo.UpdateMetrics)
 
 	return worker, nil
 }

@@ -166,6 +166,7 @@ func (app *application) createWorker(w http.ResponseWriter, r *http.Request) {
 		default:
 			app.helper.ServerError(w, err)
 		}
+		return
 	}
 
 	// Make the application aware of that new location -> add the headers to the right json helper function

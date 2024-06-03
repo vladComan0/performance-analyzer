@@ -19,7 +19,7 @@ type Worker struct {
 	Body            *json.RawMessage     `json:"body"`
 	Status          Status               `json:"status"`
 	CreatedAt       time.Time            `json:"-"`
-	Metrics         *Metrics             `json:"-"`
+	Metrics         *Metrics             `json:"metrics"`
 	Environment     *Environment         `json:"-"`
 	TokenManager    *tokens.TokenManager `json:"-"`
 	log             zerolog.Logger
@@ -47,8 +47,8 @@ func NewWorker(environmentID, concurrency, requestsPerTask int, httpMethod strin
 	return worker
 }
 
-func (w *Worker) Start(wg *sync.WaitGroup, updateFunc func(id int, status Status) error) {
-	if err := updateFunc(w.ID, StatusRunning); err != nil {
+func (w *Worker) Start(wg *sync.WaitGroup, updateStatusFunc func(id int, status Status) error, updateMetricsFunc func(id int, metrics *Metrics) error) {
+	if err := updateStatusFunc(w.ID, StatusRunning); err != nil {
 		w.log.Error().Err(err).Msg("Error updating status to running")
 		return
 	}
@@ -60,29 +60,25 @@ func (w *Worker) Start(wg *sync.WaitGroup, updateFunc func(id int, status Status
 	}
 	wg.Wait()
 
-	if err := updateFunc(w.ID, StatusFinished); err != nil {
+	if err := updateStatusFunc(w.ID, StatusFinished); err != nil {
 		w.log.Error().Err(err).Msg("Error updating status to finished")
 		return
 	}
 	w.SetStatus(StatusFinished)
 
-	ranks := []float64{50, 95, 99, 99.9}
+	ranks := []PercentileRank{P50, P95, P99, P999}
 	if err := w.Metrics.CalculatePercentiles(ranks...); err != nil {
 		w.log.Error().Err(err).Msg("Error calculating Percentiles")
 		return
 	}
 
-	w.log.Info().Msgf("p50 latency: %.6f s", w.Metrics.Percentiles[50]/1e9)
-	w.log.Info().Msgf("p95 latency: %.6f s", w.Metrics.Percentiles[95]/1e9)
-	w.log.Info().Msgf("p99 latency: %.6f s", w.Metrics.Percentiles[99]/1e9)
-	w.log.Info().Msgf("p999 latency: %.6f s", w.Metrics.Percentiles[99.9]/1e9)
-
 	w.Metrics.CalculateMaxLatency()
+	w.Metrics.CalculateErrorRate()
 
-	w.log.Info().Msgf("Max latency: %.6f s", float64(w.Metrics.MaxLatency)/1e9)
-	w.log.Info().Msgf("Total requests: %d", w.Metrics.TotalRequests)
-	w.log.Info().Msgf("Failed requests: %d", w.Metrics.FailedRequests)
-	w.log.Info().Msgf("Error rate: %.2f%%", 100*w.Metrics.CalculateErrorRate())
+	if err := updateMetricsFunc(w.ID, w.Metrics); err != nil {
+		w.log.Error().Err(err).Msg("Error updating metrics")
+		return
+	}
 }
 
 func (w *Worker) run(wg *sync.WaitGroup) {

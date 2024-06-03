@@ -13,6 +13,7 @@ type WorkerRepository interface {
 	Get(id int) (*Worker, error)
 	GetAll() ([]*Worker, error)
 	UpdateStatus(id int, status Status) error
+	UpdateMetrics(id int, metrics *Metrics) error
 }
 
 type WorkerRepositoryDB struct {
@@ -33,7 +34,16 @@ func (m *WorkerRepositoryDB) Insert(worker *Worker) (int, error) {
 		INSERT INTO workers (environment_id, concurrency, requests_per_task, report, http_method, body, status, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
 		`
-		result, err := tx.Exec(stmt, worker.EnvironmentID, worker.Concurrency, worker.RequestsPerTask, worker.Report, worker.HTTPMethod, worker.Body, StatusCreated)
+		result, err := tx.Exec(
+			stmt,
+			worker.EnvironmentID,
+			worker.Concurrency,
+			worker.RequestsPerTask,
+			worker.Report,
+			worker.HTTPMethod,
+			worker.Body,
+			StatusCreated,
+		)
 		if err != nil {
 			return err
 		}
@@ -64,8 +74,17 @@ func (m *WorkerRepositoryDB) GetAll() ([]*Worker, error) {
 		http_method,
 		body,
 		status,
+		max_latency,
+		total_requests,
+		failed_requests,
+		error_rate,
+		p50,
+		p95,
+		p99,
+		p999,
 		created_at
-	FROM workers
+	FROM 
+	    workers
 	`
 
 	rows, err := m.DB.Query(stmt)
@@ -83,6 +102,10 @@ func (m *WorkerRepositoryDB) GetAll() ([]*Worker, error) {
 
 	for rows.Next() {
 		var worker = &Worker{}
+		var p50, p95, p99, p999, maxLatency, errorRate sql.NullFloat64
+		var totalRequests, failedRequests sql.NullInt64
+		worker.Metrics = &Metrics{}
+		worker.Metrics.Percentiles = make(map[PercentileRank]float64)
 
 		err := rows.Scan(
 			&worker.ID,
@@ -93,11 +116,21 @@ func (m *WorkerRepositoryDB) GetAll() ([]*Worker, error) {
 			&worker.HTTPMethod,
 			&worker.Body,
 			&worker.Status,
+			&maxLatency,
+			&totalRequests,
+			&failedRequests,
+			&errorRate,
+			&p50,
+			&p95,
+			&p99,
+			&p999,
 			&worker.CreatedAt,
 		)
 		if err != nil {
 			return nil, err
 		}
+
+		assignValidMetricsFromDB(worker, maxLatency, totalRequests, failedRequests, errorRate, p50, p95, p99, p999)
 
 		if _, exists := workers[worker.ID]; !exists {
 			workers[worker.ID] = worker
@@ -132,10 +165,15 @@ func (m *WorkerRepositoryDB) Get(id int) (*Worker, error) {
 
 func (m *WorkerRepositoryDB) getWithTx(tx transactions.Transaction, id int) (*Worker, error) {
 	worker := &Worker{}
+	worker.Metrics = &Metrics{}
+	worker.Metrics.Percentiles = make(map[PercentileRank]float64)
+
+	var p50, p95, p99, p999, maxLatency, errorRate sql.NullFloat64
+	var totalRequests, failedRequests sql.NullInt64
 
 	stmt := `
-	SELECT 
-		id, 
+	SELECT
+		id,
 		environment_id,
 		concurrency,
 		requests_per_task,
@@ -143,6 +181,14 @@ func (m *WorkerRepositoryDB) getWithTx(tx transactions.Transaction, id int) (*Wo
 		http_method,
 		body,
 		status,
+		max_latency,
+		total_requests,
+		failed_requests,
+		error_rate,
+		p50,
+		p95,
+		p99,
+		p999,
 		created_at
 	FROM 
 	    workers
@@ -158,6 +204,14 @@ func (m *WorkerRepositoryDB) getWithTx(tx transactions.Transaction, id int) (*Wo
 		&worker.HTTPMethod,
 		&worker.Body,
 		&worker.Status,
+		&maxLatency,
+		&totalRequests,
+		&failedRequests,
+		&errorRate,
+		&p50,
+		&p95,
+		&p99,
+		&p999,
 		&worker.CreatedAt,
 	)
 	if err != nil {
@@ -168,6 +222,8 @@ func (m *WorkerRepositoryDB) getWithTx(tx transactions.Transaction, id int) (*Wo
 			return nil, err
 		}
 	}
+
+	assignValidMetricsFromDB(worker, maxLatency, totalRequests, failedRequests, errorRate, p50, p95, p99, p999)
 
 	return worker, nil
 }
@@ -189,4 +245,75 @@ func (m *WorkerRepositoryDB) UpdateStatus(id int, newStatus Status) error {
 	})
 
 	return err
+}
+
+func (m *WorkerRepositoryDB) UpdateMetrics(id int, metrics *Metrics) error {
+	err := transactions.WithTransaction(m.DB, func(tx transactions.Transaction) error {
+		stmt := `
+        UPDATE workers
+        SET max_latency = ?,
+            total_requests = ?,
+            failed_requests = ?,
+            error_rate = ?,
+            p50 = ?,
+            p95 = ?,
+            p99 = ?,
+            p999 = ?
+        WHERE id = ?
+        `
+
+		_, err := tx.Exec(
+			stmt,
+			metrics.MaxLatency,
+			metrics.TotalRequests,
+			metrics.FailedRequests,
+			metrics.ErrorRate,
+			metrics.Percentiles[P50],
+			metrics.Percentiles[P95],
+			metrics.Percentiles[P99],
+			metrics.Percentiles[P999],
+			id,
+		)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	return err
+}
+
+func assignValidMetricsFromDB(worker *Worker, maxLatency sql.NullFloat64, totalRequests, failedRequests sql.NullInt64, errorRate sql.NullFloat64, p50, p95, p99, p999 sql.NullFloat64) {
+	if maxLatency.Valid {
+		worker.Metrics.MaxLatency = maxLatency.Float64
+	}
+
+	if totalRequests.Valid {
+		worker.Metrics.TotalRequests = int(totalRequests.Int64)
+	}
+
+	if failedRequests.Valid {
+		worker.Metrics.FailedRequests = int(failedRequests.Int64)
+	}
+
+	if errorRate.Valid {
+		worker.Metrics.ErrorRate = errorRate.Float64
+	}
+
+	if p50.Valid {
+		worker.Metrics.Percentiles[P50] = p50.Float64
+	}
+
+	if p95.Valid {
+		worker.Metrics.Percentiles[P95] = p95.Float64
+	}
+
+	if p99.Valid {
+		worker.Metrics.Percentiles[P99] = p99.Float64
+	}
+
+	if p999.Valid {
+		worker.Metrics.Percentiles[P999] = p999.Float64
+	}
 }
