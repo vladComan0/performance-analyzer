@@ -5,13 +5,16 @@ import (
 	"fmt"
 	"github.com/vladComan0/performance-analyzer/internal/custom_errors"
 	"github.com/vladComan0/performance-analyzer/internal/data"
+	"github.com/vladComan0/performance-analyzer/internal/dto"
 	"github.com/vladComan0/performance-analyzer/pkg/helpers"
-	"github.com/vladComan0/performance-analyzer/pkg/tokens"
 	"net/http"
-	"sync"
 )
 
 func (app *application) ping(w http.ResponseWriter, _ *http.Request) {
+	if err := app.environmentService.PingDB(); err != nil {
+		app.helper.ServerError(w, err)
+		return
+	}
 	_, err := w.Write([]byte("pong"))
 	if err != nil {
 		app.helper.ServerError(w, err)
@@ -20,62 +23,28 @@ func (app *application) ping(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (app *application) createEnvironment(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		Name          string  `json:"name"`
-		Endpoint      string  `json:"endpoint"`
-		TokenEndpoint *string `json:"token_endpoint"`
-		Username      *string `json:"username"`
-		Password      *string `json:"password"`
-		Disabled      *bool   `json:"disabled"`
-	}
+	var input dto.CreateEnvironmentInput
 
 	if err := app.helper.ReadJSON(w, r, &input); err != nil {
 		app.helper.ClientError(w, http.StatusBadRequest)
 		return
 	}
 
-	var options []data.EnvironmentOption
-
-	if input.TokenEndpoint != nil {
-		options = append(options, data.WithEnvironmentTokenEndpoint(*input.TokenEndpoint))
-	}
-
-	if input.Username != nil {
-		options = append(options, data.WithEnvironmentUsername(*input.Username))
-	}
-
-	if input.Password != nil {
-		options = append(options, data.WithEnvironmentPassword(*input.Password))
-	}
-
-	if input.Disabled != nil {
-		options = append(options, data.WithEnvironmentDisabled(*input.Disabled))
-	}
-
-	environment := data.NewEnvironment(input.Name, input.Endpoint, options...)
-
-	id, err := app.environments.Insert(environment)
+	environment, err := app.environmentService.CreateEnvironment(input)
 	if err != nil {
 		app.helper.ServerError(w, err)
 		return
 	}
 
-	environment, err = app.environments.Get(id)
-	if err != nil {
-		app.helper.ServerError(w, err)
-		return
-	}
-
-	// Make the application aware of that new location -> add the headers to the right json helper function
 	headers := make(http.Header)
-	headers.Set("Location", fmt.Sprintf("v1/environments/%d", id))
+	headers.Set("Location", fmt.Sprintf("v1/environments/%d", environment.ID))
 
 	if err = app.helper.WriteJSON(w, http.StatusCreated, helpers.Envelope{"environment": environment}, headers); err != nil {
 		app.helper.ServerError(w, err)
 		return
 	}
 
-	app.log.Info().Msgf("Created new environment with id: %d", id)
+	app.log.Info().Msgf("Created new environment with id: %d", environment.ID)
 }
 
 func (app *application) getEnvironment(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +54,7 @@ func (app *application) getEnvironment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	environment, err := app.environments.Get(id)
+	environment, err := app.environmentService.GetEnvironment(id)
 	if err != nil {
 		switch {
 		case errors.Is(err, custom_errors.ErrNoRecord):
@@ -103,7 +72,7 @@ func (app *application) getEnvironment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (app *application) getAllEnvironments(w http.ResponseWriter, _ *http.Request) {
-	environments, err := app.environments.GetAll()
+	environments, err := app.environmentService.GetEnvironments()
 	if err != nil {
 		switch {
 		case errors.Is(err, custom_errors.ErrNoRecord):
@@ -114,7 +83,9 @@ func (app *application) getAllEnvironments(w http.ResponseWriter, _ *http.Reques
 		return
 	}
 
-	if err := app.helper.WriteJSON(w, http.StatusOK, helpers.Envelope{"environments": environments}, nil); err != nil {
+	app.log.Info().Msgf("Environments: %v", environments)
+
+	if err = app.helper.WriteJSON(w, http.StatusOK, helpers.Envelope{"environments": environments}, nil); err != nil {
 		app.helper.ServerError(w, err)
 		return
 	}
@@ -129,7 +100,13 @@ func (app *application) updateEnvironment(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	environment, err := app.environments.Get(id)
+	var input dto.UpdateEnvironmentInput
+	if err := app.helper.ReadJSON(w, r, &input); err != nil {
+		app.helper.ClientError(w, http.StatusBadRequest)
+		return
+	}
+
+	updatedEnvironment, err := app.environmentService.UpdateEnvironment(id, input)
 	if err != nil {
 		switch {
 		case errors.Is(err, custom_errors.ErrNoRecord):
@@ -140,57 +117,7 @@ func (app *application) updateEnvironment(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var input struct {
-		Name          *string `json:"name"`
-		Endpoint      *string `json:"endpoint"`
-		TokenEndpoint *string `json:"token_endpoint"`
-		Username      *string `json:"username"`
-		Password      *string `json:"password"`
-		Disabled      *bool   `json:"disabled"`
-	}
-
-	if err := app.helper.ReadJSON(w, r, &input); err != nil {
-		app.helper.ClientError(w, http.StatusBadRequest)
-		return
-	}
-
-	if input.Name != nil {
-		environment.Name = *input.Name
-	}
-
-	if input.Endpoint != nil {
-		environment.Endpoint = *input.Endpoint
-	}
-
-	if input.TokenEndpoint != nil {
-		environment.TokenEndpoint = *input.TokenEndpoint
-	}
-
-	if input.Username != nil {
-		environment.Username = *input.Username
-	}
-
-	if input.Password != nil {
-		environment.Password = *input.Password
-	}
-
-	if input.Disabled != nil {
-		environment.Disabled = *input.Disabled
-	}
-
-	err = app.environments.Update(environment)
-	if err != nil {
-		app.helper.ServerError(w, err)
-		return
-	}
-
-	updatedEnvironment, err := app.environments.Get(environment.ID) // so that password is not returned
-	if err != nil {
-		app.helper.ServerError(w, err)
-		return
-	}
-
-	if err = app.helper.WriteJSON(w, http.StatusOK, helpers.Envelope{"environment": updatedEnvironment}, nil); err != nil {
+	if err := app.helper.WriteJSON(w, http.StatusOK, helpers.Envelope{"environment": updatedEnvironment}, nil); err != nil {
 		app.helper.ServerError(w, err)
 		return
 	}
@@ -203,7 +130,7 @@ func (app *application) deleteEnvironment(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err = app.environments.Delete(id); err != nil {
+	if err = app.environmentService.DeleteEnvironment(id); err != nil {
 		switch {
 		case errors.Is(err, custom_errors.ErrNoRecord):
 			app.helper.ClientError(w, http.StatusNotFound)
@@ -229,83 +156,28 @@ func (app *application) createWorker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if input.EnvironmentID < 1 || input.Concurrency < 1 || input.RequestsPerTask < 1 {
-		app.helper.ClientError(w, http.StatusBadRequest)
-		return
-	}
-
-	environment, err := app.environments.Get(input.EnvironmentID)
+	worker, err := app.workerService.CreateWorker(input)
 	if err != nil {
 		switch {
-		case errors.Is(err, custom_errors.ErrNoRecord):
-			app.helper.ClientError(w, http.StatusNotFound)
+		case errors.Is(err, custom_errors.ErrInvalidInput):
+			app.helper.ClientError(w, http.StatusBadRequest)
+		case errors.Is(err, custom_errors.ErrEnvironmentDisabled):
+			app.helper.ClientError(w, http.StatusForbidden)
 		default:
 			app.helper.ServerError(w, err)
 		}
-		return
 	}
-
-	if environment.Disabled {
-		app.helper.ClientError(w, http.StatusForbidden)
-		return
-	}
-
-	var options []data.WorkerOption
-
-	if environment.TokenEndpoint != "" {
-		credentials := tokens.Credentials{
-			BasicAuthToken: &environment.BasicAuthToken,
-		}
-		tokenManager := tokens.NewTokenManager(credentials, environment.TokenEndpoint)
-		options = append(options, data.WithWorkerTokenManager(tokenManager))
-	}
-
-	if input.Report != "" {
-		options = append(options, data.WithWorkerReport(input.Report))
-	}
-
-	worker := data.NewWorker(
-		input.EnvironmentID,
-		input.Concurrency,
-		input.RequestsPerTask,
-		input.HTTPMethod,
-		input.Body,
-		environment,
-		app.log,
-		options...,
-	)
-
-	id, err := app.workers.Insert(worker)
-	if err != nil {
-		app.helper.ServerError(w, err)
-		return
-	}
-
-	// Fetch the worker details from the database using a dummy worker
-	workerFromDB, err := app.workers.Get(id)
-	if err != nil {
-		app.helper.ServerError(w, err)
-		return
-	}
-
-	// Update the original worker with the relevant fields
-	worker.ID = workerFromDB.ID
-	worker.Status = workerFromDB.Status
-	worker.CreatedAt = workerFromDB.CreatedAt
-
-	wg := &sync.WaitGroup{}
-	go worker.Start(wg, app.workers.UpdateStatus)
 
 	// Make the application aware of that new location -> add the headers to the right json helper function
 	headers := make(http.Header)
-	headers.Set("Location", fmt.Sprintf("v1/workers/%d", id))
+	headers.Set("Location", fmt.Sprintf("v1/workers/%d", worker.ID))
 
 	if err := app.helper.WriteJSON(w, http.StatusCreated, helpers.Envelope{"worker": worker}, nil); err != nil {
 		app.helper.ServerError(w, err)
 		return
 	}
 
-	app.log.Info().Msgf("Created new worker with id: %d", id)
+	app.log.Info().Msgf("Created new worker with id: %d", worker.ID)
 }
 
 func (app *application) getWorker(w http.ResponseWriter, r *http.Request) {
@@ -315,7 +187,7 @@ func (app *application) getWorker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	worker, err := app.workers.Get(id)
+	worker, err := app.workerService.GetWorker(id)
 	if err != nil {
 		switch {
 		case errors.Is(err, custom_errors.ErrNoRecord):
@@ -333,7 +205,7 @@ func (app *application) getWorker(w http.ResponseWriter, r *http.Request) {
 }
 
 func (app *application) getAllWorkers(w http.ResponseWriter, _ *http.Request) {
-	workers, err := app.workers.GetAll()
+	workers, err := app.workerService.GetWorkers()
 	if err != nil {
 		switch {
 		case errors.Is(err, custom_errors.ErrNoRecord):

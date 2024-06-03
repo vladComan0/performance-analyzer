@@ -7,6 +7,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 	"github.com/vladComan0/performance-analyzer/internal/data"
+	"github.com/vladComan0/performance-analyzer/internal/service"
 	"github.com/vladComan0/performance-analyzer/pkg/helpers"
 	"net/http"
 	"os"
@@ -31,11 +32,11 @@ type logConfig struct {
 }
 
 type application struct {
-	environments data.EnvironmentStorageInterface
-	workers      data.WorkerStorageInterface
-	config       config
-	helper       *helpers.Helper
-	log          zerolog.Logger
+	environmentService service.EnvironmentService
+	workerService      service.WorkerService
+	config             config
+	helper             *helpers.Helper
+	log                zerolog.Logger
 }
 
 func main() {
@@ -53,15 +54,15 @@ func main() {
 
 	helper := helpers.NewHelper(logger, cfg.DebugEnabled)
 
-	environmentModel := &data.EnvironmentStorage{
-		DB: db,
-	}
+	environmentRepository := data.NewEnvironmentRepositoryDB(db)
 
-	workerModel := &data.WorkerStorage{
-		DB: db,
-	}
+	environmentService := service.NewEnvironmentService(environmentRepository)
 
-	app := newApplication(environmentModel, workerModel, cfg, helper, logger)
+	workerRepository := data.NewWorkerRepositoryDB(db)
+
+	workerService := service.NewWorkerService(workerRepository, environmentRepository, logger)
+
+	app := newApplication(environmentService, workerService, cfg, helper, logger)
 
 	server := newServer(cfg, app)
 
@@ -71,13 +72,13 @@ func main() {
 	logger.Fatal().Err(err)
 }
 
-func newApplication(env data.EnvironmentStorageInterface, worker data.WorkerStorageInterface, cfg config, helper *helpers.Helper, log zerolog.Logger) *application {
+func newApplication(environmentService service.EnvironmentService, workerService service.WorkerService, cfg config, helper *helpers.Helper, log zerolog.Logger) *application {
 	return &application{
-		environments: env,
-		workers:      worker,
-		config:       cfg,
-		helper:       helper,
-		log:          log,
+		environmentService: environmentService,
+		workerService:      workerService,
+		config:             cfg,
+		helper:             helper,
+		log:                log,
 	}
 }
 
