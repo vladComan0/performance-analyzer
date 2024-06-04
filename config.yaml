@@ -5,5 +5,5 @@ allowedOrigins: []
 #  - "http://192.168.100.20:4200"
 dsn: "evaluator_user:$up3r$3cur3pa$$word@tcp(localhost:3306)/performance_evaluator?parseTime=true"
 log:
-  level: "info"
+  level: "debug"
   human_readable: true

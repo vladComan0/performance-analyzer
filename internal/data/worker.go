@@ -3,7 +3,9 @@ package data
 import (
 	"encoding/json"
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/vladComan0/performance-analyzer/pkg/tokens"
+	"math/rand"
 	"net/http"
 	"sync"
 	"time"
@@ -54,11 +56,22 @@ func (w *Worker) Start(wg *sync.WaitGroup, updateStatusFunc func(id int, status 
 	}
 	w.SetStatus(StatusRunning)
 
+	requests := make(chan int, w.Concurrency)
+
+	start := time.Now()
+
 	for i := 0; i < w.Concurrency; i++ {
 		wg.Add(1)
-		go w.run(wg)
+		go w.run(wg, requests)
 	}
+
+	for i := 0; i < w.RequestsPerTask; i++ {
+		requests <- i
+	}
+	close(requests)
+
 	wg.Wait()
+	log.Debug().Msgf("Took %s to finish", time.Since(start))
 
 	if err := updateStatusFunc(w.ID, StatusFinished); err != nil {
 		w.log.Error().Err(err).Msg("Error updating status to finished")
@@ -81,15 +94,19 @@ func (w *Worker) Start(wg *sync.WaitGroup, updateStatusFunc func(id int, status 
 	}
 }
 
-func (w *Worker) run(wg *sync.WaitGroup) {
+func (w *Worker) run(wg *sync.WaitGroup, requests chan int) {
 	defer wg.Done()
-	for i := 0; i < w.RequestsPerTask; i++ {
+	for range requests {
 		switch w.HTTPMethod {
 		case http.MethodGet:
 			w.get(w.Environment.Endpoint)
 		case http.MethodPost:
 			w.post(w.Environment.Endpoint)
 		}
+
+		t := time.Duration(rand.Intn(1000)) * time.Millisecond
+		w.log.Debug().Msgf("Sleeping for %s", t)
+		time.Sleep(t)
 	}
 }
 
