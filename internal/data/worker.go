@@ -5,7 +5,6 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/vladComan0/performance-analyzer/pkg/tokens"
-	"math/rand"
 	"net/http"
 	"sync"
 	"time"
@@ -65,7 +64,7 @@ func (w *Worker) Start(wg *sync.WaitGroup, updateStatusFunc func(id int, status 
 		go w.run(wg, requests)
 	}
 
-	for i := 0; i < w.RequestsPerTask; i++ {
+	for i := 0; i < w.Concurrency*w.RequestsPerTask; i++ {
 		requests <- i
 	}
 	close(requests)
