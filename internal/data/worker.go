@@ -5,6 +5,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/vladComan0/performance-analyzer/pkg/tokens"
+	"math/rand"
 	"net/http"
 	"sync"
 	"time"
