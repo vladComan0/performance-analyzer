@@ -228,6 +228,9 @@ func (m *EnvironmentRepositoryDB) getWithTx(tx transactions.Transaction, id int)
         name, 
         endpoint,
         token_endpoint,
+        username,
+        password,
+        basic_auth_token,
 		disabled,
 		created_at
     FROM 
@@ -241,6 +244,9 @@ func (m *EnvironmentRepositoryDB) getWithTx(tx transactions.Transaction, id int)
 		&environment.Name,
 		&environment.Endpoint,
 		&environment.TokenEndpoint,
+		&environment.Username,
+		&environment.Password,
+		&environment.BasicAuthToken,
 		&environment.Disabled,
 		&environment.CreatedAt,
 	)

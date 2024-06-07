@@ -3,7 +3,6 @@ package data
 import (
 	"encoding/json"
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"github.com/vladComan0/performance-analyzer/pkg/tokens"
 	"math/rand"
 	"net/http"
@@ -71,7 +70,7 @@ func (w *Worker) Start(wg *sync.WaitGroup, updateStatusFunc func(id int, status 
 	close(requests)
 
 	wg.Wait()
-	log.Debug().Msgf("Took %s to finish", time.Since(start))
+	w.log.Debug().Msgf("Took %s to finish", time.Since(start))
 
 	if err := updateStatusFunc(w.ID, StatusFinished); err != nil {
 		w.log.Error().Err(err).Msg("Error updating status to finished")
@@ -94,8 +93,9 @@ func (w *Worker) Start(wg *sync.WaitGroup, updateStatusFunc func(id int, status 
 	}
 }
 
-func (w *Worker) run(wg *sync.WaitGroup, requests chan int) {
+func (w *Worker) run(wg *sync.WaitGroup, requests <-chan int) {
 	defer wg.Done()
+
 	for range requests {
 		switch w.HTTPMethod {
 		case http.MethodGet:
@@ -169,7 +169,6 @@ func (w *Worker) createRequest(method, url string) (*http.Request, error) {
 			w.log.Error().Err(err).Msgf("Error fetching token on the URL %s", w.Environment.TokenEndpoint)
 			return nil, err
 		}
-		w.log.Debug().Msgf("Token: %s", token)
 		req.Header.Add("Authorization", "Bearer "+token)
 	}
 

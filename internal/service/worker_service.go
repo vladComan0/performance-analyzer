@@ -46,9 +46,11 @@ func (s *WorkerServiceImpl) CreateWorker(input *data.Worker) (*data.Worker, erro
 
 	if environment.TokenEndpoint != "" {
 		credentials := tokens.Credentials{
+			Username:       &environment.Username,
+			Password:       &environment.Password,
 			BasicAuthToken: &environment.BasicAuthToken,
 		}
-		tokenManager := tokens.NewTokenManager(credentials, environment.TokenEndpoint)
+		tokenManager := tokens.NewTokenManager(credentials, environment.TokenEndpoint, s.log)
 		options = append(options, data.WithWorkerTokenManager(tokenManager))
 	}
 
