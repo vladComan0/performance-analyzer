@@ -4,13 +4,14 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql"
-	"github.com/vladComan0/performance-analyzer/internal/model/repository"
 	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/vladComan0/performance-analyzer/internal/model/repository"
 
 	"github.com/rs/zerolog"
 	"github.com/vladComan0/performance-analyzer/internal/config"
@@ -132,7 +133,7 @@ func configureLogger(cfg config.Config) zerolog.Logger {
 
 func (app *application) cleanup(db *sql.DB, server *http.Server) {
 	interruptChan := make(chan os.Signal, 1)
-	signal.Notify(interruptChan, os.Interrupt, os.Kill, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(interruptChan, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
 	sig := <-interruptChan
 
