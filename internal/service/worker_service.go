@@ -1,26 +1,28 @@
 package service
 
 import (
+	"context"
 	"github.com/rs/zerolog"
 	"github.com/vladComan0/performance-analyzer/internal/custom_errors"
-	"github.com/vladComan0/performance-analyzer/internal/data"
+	"github.com/vladComan0/performance-analyzer/internal/model/entity"
+	"github.com/vladComan0/performance-analyzer/internal/model/repository"
 	"github.com/vladComan0/performance-analyzer/pkg/tokens"
 	"sync"
 )
 
 type WorkerService interface {
-	CreateWorker(input *data.Worker) (*data.Worker, error)
-	GetWorker(id int) (*data.Worker, error)
-	GetWorkers() ([]*data.Worker, error)
+	CreateWorker(ctx context.Context, input *entity.Worker) (*entity.Worker, error)
+	GetWorker(id int) (*entity.Worker, error)
+	GetWorkers() ([]*entity.Worker, error)
 }
 
 type WorkerServiceImpl struct {
-	workerRepo      data.WorkerRepository
-	environmentRepo data.EnvironmentRepository
+	workerRepo      repository.WorkerRepository
+	environmentRepo repository.EnvironmentRepository
 	log             zerolog.Logger
 }
 
-func NewWorkerService(workerRepo data.WorkerRepository, environmentRepo data.EnvironmentRepository, log zerolog.Logger) *WorkerServiceImpl {
+func NewWorkerService(workerRepo repository.WorkerRepository, environmentRepo repository.EnvironmentRepository, log zerolog.Logger) *WorkerServiceImpl {
 	return &WorkerServiceImpl{
 		workerRepo:      workerRepo,
 		environmentRepo: environmentRepo,
@@ -28,7 +30,7 @@ func NewWorkerService(workerRepo data.WorkerRepository, environmentRepo data.Env
 	}
 }
 
-func (s *WorkerServiceImpl) CreateWorker(input *data.Worker) (*data.Worker, error) {
+func (s *WorkerServiceImpl) CreateWorker(ctx context.Context, input *entity.Worker) (*entity.Worker, error) {
 	if err := s.validateWorkerInput(input); err != nil {
 		return nil, err
 	}
@@ -42,7 +44,7 @@ func (s *WorkerServiceImpl) CreateWorker(input *data.Worker) (*data.Worker, erro
 		return nil, custom_errors.ErrEnvironmentDisabled
 	}
 
-	var options []data.WorkerOption
+	var options []entity.WorkerOption
 
 	if environment.TokenEndpoint != "" {
 		credentials := tokens.Credentials{
@@ -51,10 +53,10 @@ func (s *WorkerServiceImpl) CreateWorker(input *data.Worker) (*data.Worker, erro
 			BasicAuthToken: &environment.BasicAuthToken,
 		}
 		tokenManager := tokens.NewTokenManager(credentials, environment.TokenEndpoint, s.log)
-		options = append(options, data.WithWorkerTokenManager(tokenManager))
+		options = append(options, entity.WithWorkerTokenManager(tokenManager))
 	}
 
-	worker := data.NewWorker(
+	worker := entity.NewWorker(
 		input.EnvironmentID,
 		input.Concurrency,
 		input.RequestsPerTask,
@@ -82,20 +84,20 @@ func (s *WorkerServiceImpl) CreateWorker(input *data.Worker) (*data.Worker, erro
 	worker.CreatedAt = workerFromDB.CreatedAt
 
 	wg := &sync.WaitGroup{}
-	go worker.Start(wg, s.workerRepo.UpdateStatus, s.workerRepo.UpdateMetrics)
+	go worker.Start(ctx, wg, s.workerRepo.UpdateStatus, s.workerRepo.UpdateMetrics)
 
 	return worker, nil
 }
 
-func (s *WorkerServiceImpl) GetWorker(id int) (*data.Worker, error) {
+func (s *WorkerServiceImpl) GetWorker(id int) (*entity.Worker, error) {
 	return s.workerRepo.Get(id)
 }
 
-func (s *WorkerServiceImpl) GetWorkers() ([]*data.Worker, error) {
+func (s *WorkerServiceImpl) GetWorkers() ([]*entity.Worker, error) {
 	return s.workerRepo.GetAll()
 }
 
-func (s *WorkerServiceImpl) validateWorkerInput(input *data.Worker) error {
+func (s *WorkerServiceImpl) validateWorkerInput(input *entity.Worker) error {
 	if input.EnvironmentID < 1 || input.Concurrency < 1 || input.RequestsPerTask < 1 {
 		return custom_errors.ErrInvalidInput
 	}

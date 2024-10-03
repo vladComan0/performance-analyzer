@@ -1,9 +1,10 @@
-package data
+package repository
 
 import (
 	"database/sql"
 	"errors"
 	"github.com/vladComan0/performance-analyzer/internal/custom_errors"
+	"github.com/vladComan0/performance-analyzer/internal/model/entity"
 	"github.com/vladComan0/tasty-byte/pkg/transactions"
 	"golang.org/x/crypto/bcrypt"
 	"sort"
@@ -13,10 +14,10 @@ const COST = 12 // 2^12 bcrypt iterations used to generate the password hash (4-
 
 type EnvironmentRepository interface {
 	Ping() error
-	Insert(environment *Environment) (int, error)
-	Get(id int) (*Environment, error)
-	GetAll() ([]*Environment, error)
-	Update(environment *Environment) error
+	Insert(environment *entity.Environment) (int, error)
+	Get(id int) (*entity.Environment, error)
+	GetAll() ([]*entity.Environment, error)
+	Update(environment *entity.Environment) error
 	Delete(id int) error
 }
 
@@ -34,7 +35,7 @@ func (m *EnvironmentRepositoryDB) Ping() error {
 	return m.DB.Ping()
 }
 
-func (m *EnvironmentRepositoryDB) Insert(environment *Environment) (int, error) {
+func (m *EnvironmentRepositoryDB) Insert(environment *entity.Environment) (int, error) {
 	var (
 		environmentID  int
 		hashedPassword []byte
@@ -72,9 +73,9 @@ func (m *EnvironmentRepositoryDB) Insert(environment *Environment) (int, error) 
 	return environmentID, err
 }
 
-func (m *EnvironmentRepositoryDB) GetAll() ([]*Environment, error) {
-	var results []*Environment
-	environments := make(map[int]*Environment)
+func (m *EnvironmentRepositoryDB) GetAll() ([]*entity.Environment, error) {
+	var results []*entity.Environment
+	environments := make(map[int]*entity.Environment)
 
 	stmt := `
 	SELECT 
@@ -102,7 +103,7 @@ func (m *EnvironmentRepositoryDB) GetAll() ([]*Environment, error) {
 	}(rows)
 
 	for rows.Next() {
-		var environment = &Environment{}
+		var environment = &entity.Environment{}
 
 		err := rows.Scan(
 			&environment.ID,
@@ -136,8 +137,8 @@ func (m *EnvironmentRepositoryDB) GetAll() ([]*Environment, error) {
 	return results, nil
 }
 
-func (m *EnvironmentRepositoryDB) Get(id int) (*Environment, error) {
-	var environment *Environment
+func (m *EnvironmentRepositoryDB) Get(id int) (*entity.Environment, error) {
+	var environment *entity.Environment
 
 	err := transactions.WithTransaction(m.DB, func(tx transactions.Transaction) (err error) {
 		environment, err = m.getWithTx(tx, id)
@@ -147,7 +148,7 @@ func (m *EnvironmentRepositoryDB) Get(id int) (*Environment, error) {
 	return environment, err
 }
 
-func (m *EnvironmentRepositoryDB) Update(environment *Environment) error {
+func (m *EnvironmentRepositoryDB) Update(environment *entity.Environment) error {
 	return transactions.WithTransaction(m.DB, func(tx transactions.Transaction) error {
 		existingEnvironment, err := m.getWithTx(tx, environment.ID)
 		if err != nil {
@@ -219,8 +220,8 @@ func (m *EnvironmentRepositoryDB) Delete(id int) error {
 	})
 }
 
-func (m *EnvironmentRepositoryDB) getWithTx(tx transactions.Transaction, id int) (*Environment, error) {
-	environment := &Environment{}
+func (m *EnvironmentRepositoryDB) getWithTx(tx transactions.Transaction, id int) (*entity.Environment, error) {
+	environment := &entity.Environment{}
 
 	stmt := `
     SELECT 

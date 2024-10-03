@@ -1,6 +1,7 @@
-package data
+package entity
 
 import (
+	"context"
 	"encoding/json"
 	"github.com/rs/zerolog"
 	"github.com/vladComan0/performance-analyzer/pkg/tokens"
@@ -48,14 +49,31 @@ func NewWorker(environmentID, concurrency, requestsPerTask int, httpMethod strin
 	return worker
 }
 
-func (w *Worker) Start(wg *sync.WaitGroup, updateStatusFunc func(id int, status Status) error, updateMetricsFunc func(id int, metrics *Metrics) error) {
+func (w *Worker) Start(ctx context.Context, wg *sync.WaitGroup, updateStatusFunc func(id int, status Status) error, updateMetricsFunc func(id int, metrics *Metrics) error) {
 	if err := updateStatusFunc(w.ID, StatusRunning); err != nil {
 		w.log.Error().Err(err).Msg("Error updating status to running")
 		return
 	}
 	w.SetStatus(StatusRunning)
 
+	var completedSuccessfully bool
+
+	defer func() {
+		var finalStatus Status
+		if completedSuccessfully {
+			finalStatus = StatusFinished
+		} else {
+			finalStatus = StatusFailed
+		}
+
+		if err := updateStatusFunc(w.ID, finalStatus); err != nil {
+			w.log.Error().Err(err).Msgf("Error updating status to %s", finalStatus)
+		}
+		w.SetStatus(finalStatus)
+	}()
+
 	requests := make(chan int, w.Concurrency)
+	done := make(chan struct{})
 
 	start := time.Now()
 
@@ -64,13 +82,23 @@ func (w *Worker) Start(wg *sync.WaitGroup, updateStatusFunc func(id int, status 
 		go w.run(wg, requests)
 	}
 
-	for i := 0; i < w.Concurrency*w.RequestsPerTask; i++ {
-		requests <- i
-	}
-	close(requests)
+	go func() {
+		for i := 0; i < w.Concurrency*w.RequestsPerTask; i++ {
+			requests <- i
+		}
+		close(requests)
 
-	wg.Wait()
-	w.log.Debug().Msgf("Took %s to finish", time.Since(start))
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		completedSuccessfully = true
+		w.log.Info().Msgf("Worker %d finished in %s", w.ID, time.Since(start))
+	case <-ctx.Done():
+		completedSuccessfully = false
+	}
 
 	if err := updateStatusFunc(w.ID, StatusFinished); err != nil {
 		w.log.Error().Err(err).Msg("Error updating status to finished")

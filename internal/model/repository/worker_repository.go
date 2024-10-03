@@ -1,19 +1,20 @@
-package data
+package repository
 
 import (
 	"database/sql"
 	"errors"
 	"github.com/vladComan0/performance-analyzer/internal/custom_errors"
+	"github.com/vladComan0/performance-analyzer/internal/model/entity"
 	"github.com/vladComan0/tasty-byte/pkg/transactions"
 	"sort"
 )
 
 type WorkerRepository interface {
-	Insert(worker *Worker) (int, error)
-	Get(id int) (*Worker, error)
-	GetAll() ([]*Worker, error)
-	UpdateStatus(id int, status Status) error
-	UpdateMetrics(id int, metrics *Metrics) error
+	Insert(worker *entity.Worker) (int, error)
+	Get(id int) (*entity.Worker, error)
+	GetAll() ([]*entity.Worker, error)
+	UpdateStatus(id int, status entity.Status) error
+	UpdateMetrics(id int, metrics *entity.Metrics) error
 }
 
 type WorkerRepositoryDB struct {
@@ -26,7 +27,7 @@ func NewWorkerRepositoryDB(db *sql.DB) *WorkerRepositoryDB {
 	}
 }
 
-func (m *WorkerRepositoryDB) Insert(worker *Worker) (int, error) {
+func (m *WorkerRepositoryDB) Insert(worker *entity.Worker) (int, error) {
 	var workerID int
 
 	err := transactions.WithTransaction(m.DB, func(tx transactions.Transaction) error {
@@ -42,7 +43,7 @@ func (m *WorkerRepositoryDB) Insert(worker *Worker) (int, error) {
 			worker.Report,
 			worker.HTTPMethod,
 			worker.Body,
-			StatusCreated,
+			entity.StatusCreated,
 		)
 		if err != nil {
 			return err
@@ -60,9 +61,9 @@ func (m *WorkerRepositoryDB) Insert(worker *Worker) (int, error) {
 	return workerID, err
 }
 
-func (m *WorkerRepositoryDB) GetAll() ([]*Worker, error) {
-	var results []*Worker
-	workers := make(map[int]*Worker)
+func (m *WorkerRepositoryDB) GetAll() ([]*entity.Worker, error) {
+	var results []*entity.Worker
+	workers := make(map[int]*entity.Worker)
 
 	stmt := `
 	SELECT
@@ -101,11 +102,11 @@ func (m *WorkerRepositoryDB) GetAll() ([]*Worker, error) {
 	}(rows)
 
 	for rows.Next() {
-		var worker = &Worker{}
+		var worker = &entity.Worker{}
 		var p50, p95, p99, p999, maxLatency, errorRate sql.NullFloat64
 		var totalRequests, failedRequests sql.NullInt64
-		worker.Metrics = &Metrics{}
-		worker.Metrics.Percentiles = make(map[PercentileRank]float64)
+		worker.Metrics = &entity.Metrics{}
+		worker.Metrics.Percentiles = make(map[entity.PercentileRank]float64)
 
 		err := rows.Scan(
 			&worker.ID,
@@ -152,8 +153,8 @@ func (m *WorkerRepositoryDB) GetAll() ([]*Worker, error) {
 	return results, nil
 }
 
-func (m *WorkerRepositoryDB) Get(id int) (*Worker, error) {
-	var worker *Worker
+func (m *WorkerRepositoryDB) Get(id int) (*entity.Worker, error) {
+	var worker *entity.Worker
 
 	err := transactions.WithTransaction(m.DB, func(tx transactions.Transaction) (err error) {
 		worker, err = m.getWithTx(tx, id)
@@ -163,10 +164,10 @@ func (m *WorkerRepositoryDB) Get(id int) (*Worker, error) {
 	return worker, err
 }
 
-func (m *WorkerRepositoryDB) getWithTx(tx transactions.Transaction, id int) (*Worker, error) {
-	worker := &Worker{}
-	worker.Metrics = &Metrics{}
-	worker.Metrics.Percentiles = make(map[PercentileRank]float64)
+func (m *WorkerRepositoryDB) getWithTx(tx transactions.Transaction, id int) (*entity.Worker, error) {
+	worker := &entity.Worker{}
+	worker.Metrics = &entity.Metrics{}
+	worker.Metrics.Percentiles = make(map[entity.PercentileRank]float64)
 
 	var p50, p95, p99, p999, maxLatency, errorRate sql.NullFloat64
 	var totalRequests, failedRequests sql.NullInt64
@@ -228,7 +229,7 @@ func (m *WorkerRepositoryDB) getWithTx(tx transactions.Transaction, id int) (*Wo
 	return worker, nil
 }
 
-func (m *WorkerRepositoryDB) UpdateStatus(id int, newStatus Status) error {
+func (m *WorkerRepositoryDB) UpdateStatus(id int, newStatus entity.Status) error {
 	err := transactions.WithTransaction(m.DB, func(tx transactions.Transaction) error {
 		stmt := `
 		UPDATE workers
@@ -247,7 +248,7 @@ func (m *WorkerRepositoryDB) UpdateStatus(id int, newStatus Status) error {
 	return err
 }
 
-func (m *WorkerRepositoryDB) UpdateMetrics(id int, metrics *Metrics) error {
+func (m *WorkerRepositoryDB) UpdateMetrics(id int, metrics *entity.Metrics) error {
 	err := transactions.WithTransaction(m.DB, func(tx transactions.Transaction) error {
 		stmt := `
         UPDATE workers
@@ -268,10 +269,10 @@ func (m *WorkerRepositoryDB) UpdateMetrics(id int, metrics *Metrics) error {
 			metrics.TotalRequests,
 			metrics.FailedRequests,
 			metrics.ErrorRate,
-			metrics.Percentiles[P50],
-			metrics.Percentiles[P95],
-			metrics.Percentiles[P99],
-			metrics.Percentiles[P999],
+			metrics.Percentiles[entity.P50],
+			metrics.Percentiles[entity.P95],
+			metrics.Percentiles[entity.P99],
+			metrics.Percentiles[entity.P999],
 			id,
 		)
 		if err != nil {
@@ -284,7 +285,7 @@ func (m *WorkerRepositoryDB) UpdateMetrics(id int, metrics *Metrics) error {
 	return err
 }
 
-func assignValidMetricsFromDB(worker *Worker, maxLatency sql.NullFloat64, totalRequests, failedRequests sql.NullInt64, errorRate sql.NullFloat64, p50, p95, p99, p999 sql.NullFloat64) {
+func assignValidMetricsFromDB(worker *entity.Worker, maxLatency sql.NullFloat64, totalRequests, failedRequests sql.NullInt64, errorRate sql.NullFloat64, p50, p95, p99, p999 sql.NullFloat64) {
 	if maxLatency.Valid {
 		worker.Metrics.MaxLatency = maxLatency.Float64
 	}
@@ -302,18 +303,18 @@ func assignValidMetricsFromDB(worker *Worker, maxLatency sql.NullFloat64, totalR
 	}
 
 	if p50.Valid {
-		worker.Metrics.Percentiles[P50] = p50.Float64
+		worker.Metrics.Percentiles[entity.P50] = p50.Float64
 	}
 
 	if p95.Valid {
-		worker.Metrics.Percentiles[P95] = p95.Float64
+		worker.Metrics.Percentiles[entity.P95] = p95.Float64
 	}
 
 	if p99.Valid {
-		worker.Metrics.Percentiles[P99] = p99.Float64
+		worker.Metrics.Percentiles[entity.P99] = p99.Float64
 	}
 
 	if p999.Valid {
-		worker.Metrics.Percentiles[P999] = p999.Float64
+		worker.Metrics.Percentiles[entity.P999] = p999.Float64
 	}
 }

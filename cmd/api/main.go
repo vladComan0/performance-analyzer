@@ -1,17 +1,21 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"database/sql"
-	"github.com/rs/zerolog"
-	"github.com/vladComan0/performance-analyzer/internal/config"
-	"github.com/vladComan0/performance-analyzer/internal/data"
-	"github.com/vladComan0/performance-analyzer/internal/service"
-	"github.com/vladComan0/performance-analyzer/pkg/helpers"
+	"github.com/vladComan0/performance-analyzer/internal/model/repository"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/vladComan0/performance-analyzer/internal/config"
+	"github.com/vladComan0/performance-analyzer/internal/service"
+	"github.com/vladComan0/performance-analyzer/pkg/helpers"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -26,7 +30,6 @@ type application struct {
 
 func main() {
 	cfg := config.GetConfig()
-
 	logger := configureLogger(cfg)
 
 	db, err := openDB(cfg.DSN)
@@ -34,22 +37,22 @@ func main() {
 		logger.Fatal().Err(err)
 	}
 	defer func() {
-		_ = db.Close()
+		if db != nil { // done only to remain consistent, it is taken care of by the cleanup method
+			_ = db.Close()
+		}
 	}()
 
 	helper := helpers.NewHelper(logger, cfg.DebugEnabled)
 
-	environmentRepository := data.NewEnvironmentRepositoryDB(db)
-
+	environmentRepository := repository.NewEnvironmentRepositoryDB(db)
 	environmentService := service.NewEnvironmentService(environmentRepository)
-
-	workerRepository := data.NewWorkerRepositoryDB(db)
-
+	workerRepository := repository.NewWorkerRepositoryDB(db)
 	workerService := service.NewWorkerService(workerRepository, environmentRepository, logger)
 
 	app := newApplication(environmentService, workerService, cfg, helper, logger)
-
 	server := newServer(cfg, app)
+
+	go app.cleanup(db, server)
 
 	logger.Info().Msgf("Starting server on port: %s", strings.Split(server.Addr, ":")[1])
 	//err := server.ListenAndServeTLS("./tls/cert.pem", "./tls/key.pem")
@@ -125,4 +128,25 @@ func configureLogger(cfg config.Config) zerolog.Logger {
 	}
 
 	return logger
+}
+
+func (app *application) cleanup(db *sql.DB, server *http.Server) {
+	interruptChan := make(chan os.Signal, 1)
+	signal.Notify(interruptChan, os.Interrupt, os.Kill, syscall.SIGINT, syscall.SIGTERM)
+
+	sig := <-interruptChan
+
+	app.log.Info().Msgf("Received shutdown signal %s, cleaning up...", sig)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
+		app.log.Error().Err(err).Msg("Error shutting server down")
+	}
+
+	if err := db.Close(); err != nil {
+		app.log.Error().Msgf("Error closing the database: %s", err)
+	}
+
+	os.Exit(0)
 }

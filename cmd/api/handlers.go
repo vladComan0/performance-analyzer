@@ -3,11 +3,12 @@ package main
 import (
 	"errors"
 	"fmt"
+	"github.com/vladComan0/performance-analyzer/internal/model/entity"
+	"net/http"
+
 	"github.com/vladComan0/performance-analyzer/internal/custom_errors"
-	"github.com/vladComan0/performance-analyzer/internal/data"
 	"github.com/vladComan0/performance-analyzer/internal/dto"
 	"github.com/vladComan0/performance-analyzer/pkg/helpers"
-	"net/http"
 )
 
 func (app *application) ping(w http.ResponseWriter, _ *http.Request) {
@@ -149,14 +150,14 @@ func (app *application) deleteEnvironment(w http.ResponseWriter, r *http.Request
 }
 
 func (app *application) createWorker(w http.ResponseWriter, r *http.Request) {
-	var input *data.Worker
+	var input *entity.Worker
 
 	if err := app.helper.ReadJSON(w, r, &input); err != nil {
 		app.helper.ClientError(w, http.StatusBadRequest)
 		return
 	}
 
-	worker, err := app.workerService.CreateWorker(input)
+	worker, err := app.workerService.CreateWorker(r.Context(), input) // solve workers not updating status to `failed` in case of failure
 	if err != nil {
 		switch {
 		case errors.Is(err, custom_errors.ErrInvalidInput):

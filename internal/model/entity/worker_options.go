@@ -1,4 +1,4 @@
-package data
+package entity
 
 import "github.com/vladComan0/performance-analyzer/pkg/tokens"
 

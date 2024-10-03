@@ -1,24 +1,25 @@
 package service
 
 import (
-	"github.com/vladComan0/performance-analyzer/internal/data"
 	"github.com/vladComan0/performance-analyzer/internal/dto"
+	"github.com/vladComan0/performance-analyzer/internal/model/entity"
+	"github.com/vladComan0/performance-analyzer/internal/model/repository"
 )
 
 type EnvironmentService interface {
 	PingDB() error
-	CreateEnvironment(input dto.CreateEnvironmentInput) (*data.Environment, error)
-	GetEnvironment(id int) (*data.Environment, error)
-	GetEnvironments() ([]*data.Environment, error)
-	UpdateEnvironment(id int, input dto.UpdateEnvironmentInput) (*data.Environment, error)
+	CreateEnvironment(input dto.CreateEnvironmentInput) (*entity.Environment, error)
+	GetEnvironment(id int) (*entity.Environment, error)
+	GetEnvironments() ([]*entity.Environment, error)
+	UpdateEnvironment(id int, input dto.UpdateEnvironmentInput) (*entity.Environment, error)
 	DeleteEnvironment(id int) error
 }
 
 type EnvironmentServiceImpl struct {
-	environmentRepo data.EnvironmentRepository
+	environmentRepo repository.EnvironmentRepository
 }
 
-func NewEnvironmentService(environmentRepo data.EnvironmentRepository) *EnvironmentServiceImpl {
+func NewEnvironmentService(environmentRepo repository.EnvironmentRepository) *EnvironmentServiceImpl {
 	return &EnvironmentServiceImpl{
 		environmentRepo: environmentRepo,
 	}
@@ -28,23 +29,23 @@ func (s *EnvironmentServiceImpl) PingDB() error {
 	return s.environmentRepo.Ping()
 }
 
-func (s *EnvironmentServiceImpl) CreateEnvironment(input dto.CreateEnvironmentInput) (*data.Environment, error) {
-	var options []data.EnvironmentOption
+func (s *EnvironmentServiceImpl) CreateEnvironment(input dto.CreateEnvironmentInput) (*entity.Environment, error) {
+	var options []entity.EnvironmentOption
 	if input.TokenEndpoint != nil {
-		options = append(options, data.WithEnvironmentTokenEndpoint(*input.TokenEndpoint))
+		options = append(options, entity.WithEnvironmentTokenEndpoint(*input.TokenEndpoint))
 	}
 	if input.Username != nil {
-		options = append(options, data.WithEnvironmentUsername(*input.Username))
+		options = append(options, entity.WithEnvironmentUsername(*input.Username))
 	}
 	if input.Password != nil {
-		options = append(options, data.WithEnvironmentPassword(*input.Password))
+		options = append(options, entity.WithEnvironmentPassword(*input.Password))
 	}
 	if input.Disabled != nil {
-		options = append(options, data.WithEnvironmentDisabled(*input.Disabled))
+		options = append(options, entity.WithEnvironmentDisabled(*input.Disabled))
 
 	}
 
-	environment := data.NewEnvironment(input.Name, input.Endpoint, options...)
+	environment := entity.NewEnvironment(input.Name, input.Endpoint, options...)
 	id, err := s.environmentRepo.Insert(environment)
 	if err != nil {
 		return nil, err
@@ -52,15 +53,15 @@ func (s *EnvironmentServiceImpl) CreateEnvironment(input dto.CreateEnvironmentIn
 	return s.environmentRepo.Get(id)
 }
 
-func (s *EnvironmentServiceImpl) GetEnvironment(id int) (*data.Environment, error) {
+func (s *EnvironmentServiceImpl) GetEnvironment(id int) (*entity.Environment, error) {
 	return s.environmentRepo.Get(id)
 }
 
-func (s *EnvironmentServiceImpl) GetEnvironments() ([]*data.Environment, error) {
+func (s *EnvironmentServiceImpl) GetEnvironments() ([]*entity.Environment, error) {
 	return s.environmentRepo.GetAll()
 }
 
-func (s *EnvironmentServiceImpl) UpdateEnvironment(id int, input dto.UpdateEnvironmentInput) (*data.Environment, error) {
+func (s *EnvironmentServiceImpl) UpdateEnvironment(id int, input dto.UpdateEnvironmentInput) (*entity.Environment, error) {
 	environment, err := s.environmentRepo.Get(id)
 	if err != nil {
 		return nil, err
